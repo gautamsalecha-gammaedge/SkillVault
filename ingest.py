@@ -5,7 +5,8 @@ Run this ONCE per machine manual to load it into the knowledge base.
 
 What it does, in plain steps:
 1. Reads a PDF file and pulls out all the text.
-2. Cuts that text into small chunks (so search results are focused, not whole pages).
+2. Cuts that text into small overlapping chunks (so search results are
+   focused, not whole pages, and don't lose context at chunk edges).
 3. Turns each chunk into an "embedding" (a list of numbers representing meaning).
 4. Saves each chunk + its embedding into Chroma, tagged with the machine_id.
 
@@ -14,57 +15,10 @@ Usage:
 """
 
 import sys
-import os
-from dotenv import load_dotenv
-from google import genai
-from google.genai import types
-from pypdf import PdfReader
-import chromadb
 
-# --- Setup ---
-load_dotenv()  # reads GEMINI_API_KEY from your .env file
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-
-# Chroma will create a local folder called "chroma_db" to store everything.
-# This is your RAG database — no external server needed.
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
-collection = chroma_client.get_or_create_collection(name="skillvault_knowledge")
-
-
-def extract_text_from_pdf(pdf_path: str) -> str:
-    """Reads a PDF and returns all its text as one big string."""
-    reader = PdfReader(pdf_path)
-    full_text = ""
-    for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            full_text += text + "\n"
-    return full_text
-
-
-def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list[str]:
-    """
-    Cuts a long string into overlapping chunks.
-    chunk_size = roughly how many characters per chunk.
-    overlap = how much chunks share, so we don't lose context at the edges.
-    """
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-    return chunks
-
-
-def embed_text(text: str) -> list[float]:
-    """Turns a piece of text into a vector (list of numbers) using Gemini's embedding model."""
-    result = client.models.embed_content(
-        model="gemini-embedding-001",
-        contents=text,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
-    )
-    return result.embeddings[0].values
+from rag.embeddings import embed_text
+from rag.chroma_store import collection
+from rag.chunking import extract_text_from_pdf, chunk_text
 
 
 def ingest_pdf(pdf_path: str, machine_id: str):
@@ -77,7 +31,7 @@ def ingest_pdf(pdf_path: str, machine_id: str):
 
     print("Embedding and saving each chunk ...")
     for i, chunk in enumerate(chunks):
-        embedding = embed_text(chunk)
+        embedding = embed_text(chunk, task_type="RETRIEVAL_DOCUMENT")
         collection.upsert(
             ids=[f"{machine_id}-manual-{i}"],
             embeddings=[embedding],
