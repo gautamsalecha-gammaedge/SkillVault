@@ -29,3 +29,8 @@ TOKEN_EXPIRY_HOURS = int(os.environ.get("TOKEN_EXPIRY_HOURS", "24"))
 # --- Chroma ---
 CHROMA_PATH = "./chroma_db"
 CHROMA_COLLECTION_NAME = "skillvault_knowledge"
+
+# --- Sarvam AI (text-to-speech) ---
+SARVAM_API_KEY = os.environ["SARVAM_API_KEY"]
+SARVAM_TTS_MODEL = "bulbul:v3"
+SARVAM_TTS_DEFAULT_SPEAKER = "shubh"

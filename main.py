@@ -21,15 +21,29 @@ Run it with:
 """
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from routers import ask, knowledge, worker, admin
+from routers import ask, knowledge, worker, admin, voice
 
 app = FastAPI(title="SkillVault AI Backend")
+
+# Allows the browser-based frontend (opened as a local file, or served from
+# a different origin/port) to actually call this API. Without this, the
+# browser blocks the request before it reaches any endpoint - which is
+# exactly what "Failed to fetch" in the voice test page means.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(ask.router)
 app.include_router(knowledge.router)
 app.include_router(worker.router)
 app.include_router(admin.router)
+app.include_router(voice.router)
 
 
 @app.get("/")
