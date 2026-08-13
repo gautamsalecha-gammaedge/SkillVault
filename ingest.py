@@ -78,13 +78,14 @@ def ingest_pdf(pdf_path: str, machine_id: str):
     print("Embedding and saving each chunk ...")
     for i, chunk in enumerate(chunks):
         embedding = embed_text(chunk)
-        collection.add(
+        collection.upsert(
             ids=[f"{machine_id}-manual-{i}"],
             embeddings=[embedding],
             documents=[chunk],
             metadatas=[{
                 "machine_id": machine_id,
                 "source_type": "manual",
+                "status": "approved",
             }],
         )
         print(f"  Saved chunk {i + 1}/{len(chunks)}")
