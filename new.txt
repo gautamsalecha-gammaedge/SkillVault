@@ -1,0 +1,136 @@
+# SkillVault AI — Project Handoff / Continuation Prompt
+
+Paste everything below into a new chat to continue this project with full context.
+
+---
+
+## What this project is
+
+**SkillVault AI** — a voice-first knowledge capture system for factory shop-floor workers. It preserves experienced machine operators' practical knowledge (tips, fixes, warnings) and makes it instantly searchable/askable by any worker, in their own language (Hindi, Hinglish, English, and eventually Marathi/Tamil/Urdu).
+
+Core idea: a worker asks a question about a machine → gets a grounded, conversational answer based on the manual + other workers' approved tips. A worker can also add a new tip → an AI checks if it's specific enough to be useful → if not, asks ONE clarifying question → saves it as "pending" → an admin reviews and approves it before it becomes searchable.
+
+---
+
+## Current architecture
+
+```
+SkillVault/
+├── main.py                    # Creates FastAPI app, includes all routers, CORS enabled
+├── config.py                  # All env vars/constants in one place
+├── db.py                      # Postgres connection (SQLAlchemy)
+├── models.py                  # Postgres tables: Worker, WorkerSession, AdminSession
+├── setup_db.py                 # One-time script to create Postgres tables
+├── schemas.py                  # All Pydantic request models
+├── ingest.py                   # Standalone script: loads a machine manual PDF into Chroma
+├── voice_test.html              # Standalone frontend test harness (mic input, Ask/Add modes)
+│
+├── auth/
+│   ├── security.py             # hash_password, make_expiry_time, shared bearer_scheme
+│   ├── worker_auth.py           # require_worker dependency
+│   └── admin_auth.py            # require_admin dependency
+│
+├── rag/
+│   ├── chunking.py              # PDF extraction + chunk_text (used by ingest.py)
+│   ├── embeddings.py             # Gemini client + embed_text() — Gemini ONLY, no fallback
+│   ├── chroma_store.py           # Chroma client + collection setup
+│   ├── prompts.py                # ANSWER_PROMPT for /ask
+│   ├── confirmations.py           # Static spoken confirmation phrases per language (for /add-knowledge)
+│   ├── knowledge_review.py        # Completeness check + grammar polish (single combined LLM call)
+│   └── llm_provider.py            # generate_text() — Gemini primary, Groq fallback for TEXT GEN ONLY
+│
+├── voice/
+│   ├── tts.py                    # Sarvam AI (Bulbul v3) text-to-speech wrapper
+│   └── cache.py                   # In-memory audio cache with TTL, avoids re-paying Sarvam for repeat text
+│
+└── routers/
+    ├── ask.py                     # POST /ask
+    ├── knowledge.py                 # POST /add-knowledge, POST /add-knowledge/check
+    ├── worker.py                    # POST /worker/register, POST /worker/login
+    ├── admin.py                     # POST /admin/login, GET /admin/pending, POST /admin/approve/{id}, DELETE /admin/delete/{id}
+    └── voice.py                     # POST /speak
+```
+
+## Storage (3 separate systems, each doing one job)
+
+| What | Where |
+|---|---|
+| Worker accounts, worker/admin login sessions | **Postgres** (`workers`, `worker_sessions`, `admin_sessions` tables) |
+| Admin's own username/password | `.env` file only (single fixed admin, no `admins` table yet) |
+| Manual chunks + worker knowledge (text, embeddings, approval status) | **Chroma** (`chroma_db/` folder, local persistent vector store) |
+| Generated speech audio (temporary) | In-memory cache only, resets on server restart |
+
+---
+
+## Key design decisions already made (don't re-litigate these without reason)
+
+1. **Embeddings stay Gemini-only, no fallback.** Switching embedding providers mid-flight would produce vectors from a different vector space and silently break search. Only *text generation* (answers, completeness checks) has a fallback.
+
+2. **LLM fallback: Gemini primary → Groq fallback**, via `rag/llm_provider.py`'s `generate_text()`. ChatGPT/Claude API were ruled out as "free" options since they don't have real ongoing free tiers. Groq fallback is optional — if `GROQ_API_KEY` isn't set in `.env`, the app just skips it and surfaces the Gemini error directly.
+
+3. **Voice: hybrid approach for cost control.**
+   - **Speech-to-text (listening)**: Web Speech API (browser-based, $0 forever) — chosen over Sarvam STT specifically to avoid per-use cost at real factory scale.
+   - **Text-to-speech (speaking)**: Sarvam AI Bulbul v3 (paid, ~₹30/10K characters) — chosen because browser TTS voices don't reliably have Indian-English accents installed (confirmed: this specific machine only had `hi-IN` and no `en-IN` voice at all, defaulting to American English). Sarvam has native Hinglish code-switching support.
+   - **Audio caching added** (`voice/cache.py`) — identical (text + language + speaker) combos reuse cached audio instead of re-paying Sarvam. TTL defaults to 24 hours (`AUDIO_CACHE_TTL_HOURS` in `.env`), so stale entries eventually regenerate.
+
+4. **Knowledge completeness check + clarifying question, capped at exactly 2 rounds.**
+   - Worker submits a tip → `POST /add-knowledge/check` (round=1) → Gemini judges if it's specific enough to be useful on its own.
+   - If incomplete → returns ONE short, conversational clarifying question (acknowledges what's known, asks about the single most important gap) — does NOT store yet.
+   - Worker answers → frontend combines original text + answer → calls `/add-knowledge/check` again with round=2 → **backend forces `complete=true` regardless of what the model thinks** (hard cap enforced server-side in `routers/knowledge.py`, not just trusted from frontend) → saves.
+   - The check endpoint ALWAYS returns a `polished_text` (grammar/clarity cleanup only — **never changes facts**, since a tip might be legitimately specific to one worker's exact machine/process). Both the completeness check and the polish happen in a SINGLE model call to keep cost/latency down (worst case: 2 Gemini calls per submission, not 3).
+   - **Never lose the worker's words**: if the check/polish step fails for any reason (network issue, provider outage), the frontend falls back to saving the raw, unpolished text directly rather than showing an error and discarding it. Saved entries are marked "Saved (unreviewed)" in that case.
+
+5. **Admin approval is the final quality gate**, regardless of what the AI clarifying step catches or misses. Nothing skips admin review just because the AI thought it was "complete."
+
+6. **CORS is wide open (`allow_origins=["*"]`)** for local dev/testing — flagged as needing tightening before any real deployment.
+
+7. Passwords are hashed (SHA-256), sessions live in Postgres with expiry (`TOKEN_EXPIRY_HOURS`, default 24h), tokens are NOT hashed in the DB (flagged as a production gap, not fixed yet).
+
+---
+
+## Known gaps / deliberately deferred (production-hardening list, not urgent)
+
+- Session tokens stored as plain text in Postgres (should be hashed)
+- No `admins` table (single admin hardcoded in `.env`)
+- No expired-session cleanup job (lazy cleanup only, on lookup)
+- No DB migrations tool (Alembic) — `setup_db.py` just creates tables directly
+- Chroma runs in local single-process mode (SQLite-backed) — fine for one server, not for concurrent-write scale
+- Audio cache is in-memory only, resets on restart, unbounded growth (fine at current scale)
+- Round-cap for clarifying questions is enforced server-side (good), but there's no persistent session/state tracking beyond that — frontend passes the round number itself
+- Urdu isn't in Sarvam's language list — currently falls back to Hindi's script/sound in `voice/tts.py`'s `LANGUAGE_CODE_MAP`
+
+---
+
+## What's tested and confirmed working
+
+- All original 9 REST endpoints (worker/admin auth, ask, add-knowledge, admin review flow) — Postgres + Chroma hybrid storage
+- Swagger `/docs` Authorize flow (HTTPBearer security scheme)
+- CORS fix for the browser frontend
+- Voice test harness (`voice_test.html`): mic input via Web Speech API in Hindi and English, hits real `/ask` and `/add-knowledge` endpoints
+- Sarvam TTS integration (`POST /speak`) — confirmed working, confirmed cheap (₹1.64 for 3 real test calls, ₹100 free tier confirmed)
+- Audio caching — confirmed `X-Cache: hit` vs `miss` headers work correctly, second identical call doesn't re-bill Sarvam
+- Clarifying-question flow — confirmed a vague tip ("machine makes noise sometimes") correctly triggers ONE natural clarifying question, capped at 2 rounds total, and found/fixed a real UI bug where a stray extra click after saving could resubmit stale leftover text as a new tip (fixed by clearing the transcript box after any successful save)
+
+## What's NOT yet tested / next up
+
+- Whether the Groq fallback actually activates correctly when Gemini fails (needs a deliberate Gemini-failure test — e.g. temporarily using an invalid `GEMINI_API_KEY` to confirm Groq picks up the `/ask` call)
+- Checking `GET /admin/pending` to visually confirm the final polished, combined tip (original text + clarifying answer, merged and grammar-cleaned) looks correct
+- This voice/clarifying-agent work is on a branch (was `admin-login-feature`, may have changed) — has NOT yet been merged into `main`
+
+---
+
+## Longer-term roadmap (not started yet)
+
+- A real (non-test-harness) frontend — "heavy" version planned for later, once voice fundamentals are proven out
+- Expanding language support: Marathi, Tamil, Urdu (Sarvam supports Marathi/Tamil already; Urdu needs a real solution since it currently falls back to Hindi)
+- Possibly moving to OmniVoice (WaveSpeedAI) or re-evaluating providers if Sarvam's Hindi/Hinglish accent quality doesn't hold up at scale — deliberately NOT switched yet, no concrete problem was driving that exploration
+- Production-hardening list above, once past the demo/pilot stage
+
+---
+
+## How I like to work (for whoever picks this up)
+
+- Explain trade-offs plainly before writing code, especially cost/complexity trade-offs — I care specifically about NOT accidentally creating recurring costs that scale badly with real worker usage.
+- Confirm the plan/design in plain language before generating a lot of code, especially for multi-file changes — I'm pasting code manually into my own project structure, not using an integrated dev environment, so I want to understand what a change does before I make it.
+- Point out loopholes or risks in my own ideas honestly, don't just agree and implement.
+- Keep explanations grounded in what's actually in the code, not generic AI advice.

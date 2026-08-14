@@ -29,3 +29,18 @@ TOKEN_EXPIRY_HOURS = int(os.environ.get("TOKEN_EXPIRY_HOURS", "24"))
 # --- Chroma ---
 CHROMA_PATH = "./chroma_db"
 CHROMA_COLLECTION_NAME = "skillvault_knowledge"
+
+# --- Sarvam AI (text-to-speech) ---
+SARVAM_API_KEY = os.environ["SARVAM_API_KEY"]
+SARVAM_TTS_MODEL = "bulbul:v3"
+SARVAM_TTS_DEFAULT_SPEAKER = "shubh"
+
+# How long generated audio stays cached before it's considered stale and
+# regenerated on next request. Defaults to 24 hours if not set in .env.
+AUDIO_CACHE_TTL_HOURS = int(os.environ.get("AUDIO_CACHE_TTL_HOURS", "24"))
+
+# --- Groq (fallback text-generation provider if Gemini fails) ---
+# Optional - if not set in .env, the app just skips the fallback and
+# surfaces the original Gemini error instead.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = "llama-3.3-70b-versatile"

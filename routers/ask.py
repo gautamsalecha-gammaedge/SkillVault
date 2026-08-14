@@ -12,8 +12,7 @@ from schemas import AskRequest
 from rag.embeddings import embed_text
 from rag.chroma_store import collection
 from rag.prompts import ANSWER_PROMPT
-from rag.embeddings import client as gemini_client
-from config import LLM_MODEL
+from rag.llm_provider import generate_text
 
 router = APIRouter()
 
@@ -40,9 +39,9 @@ def ask(req: AskRequest):
         return {"answer": "I don't have any knowledge saved for this machine yet."}
 
     prompt = ANSWER_PROMPT.format(context=context, question=req.question)
-    response = gemini_client.models.generate_content(model=LLM_MODEL, contents=prompt)
+    answer_text = generate_text(prompt)
 
     return {
-        "answer": response.text,
+        "answer": answer_text,
         "sources_used": len(retrieved_chunks),
     }
