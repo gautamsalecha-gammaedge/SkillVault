@@ -14,7 +14,7 @@ from rag.chroma_store import collection
 from rag.confirmations import get_confirmation_message
 from rag.knowledge_review import review_knowledge
 
-router = APIRouter()
+router = APIRouter(prefix="/Knowledge" , tags=["Knowledge"])
 
 
 @router.post("/add-knowledge/check")

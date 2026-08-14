@@ -1,10 +1,13 @@
 """
 routers/admin.py
 
-POST   /admin/login          - admin logs in, gets a token that expires after TOKEN_EXPIRY_HOURS
-GET    /admin/pending        - admin views knowledge waiting for approval, for one machine
-POST   /admin/approve/{id}   - admin approves a pending entry
-DELETE /admin/delete/{id}    - admin deletes an entry (pending or approved)
+POST   /admin/login                    - admin logs in, gets a token that expires after TOKEN_EXPIRY_HOURS
+GET    /admin/pending                  - admin views knowledge waiting for approval, for one machine
+POST   /admin/approve/{id}             - admin approves a pending knowledge entry
+DELETE /admin/delete/{id}              - admin deletes a knowledge entry (pending or approved)
+GET    /admin/pending-workers          - admin views worker registrations waiting for approval
+POST   /admin/approve-worker/{id}      - admin approves a worker's account, letting them log in
+DELETE /admin/reject-worker/{id}       - admin rejects/removes a worker's registration entirely
 """
 
 import secrets
@@ -12,14 +15,14 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from db import get_db
-from models import AdminSession
+from models import AdminSession, Worker , WorkerSession
 from schemas import AdminLoginRequest
 from auth.security import make_expiry_time
 from auth.admin_auth import require_admin
 from rag.chroma_store import collection
 from config import ADMIN_USERNAME, ADMIN_PASSWORD, TOKEN_EXPIRY_HOURS
 
-router = APIRouter(prefix="/admin")
+router = APIRouter(prefix="/admin",tags=["Admin"])
 
 
 @router.post("/login")
@@ -41,7 +44,7 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
 
 @router.get("/pending")
 def get_pending(machine_id: str, authorized: bool = Depends(require_admin)):
-    """Returns all worker-added entries still waiting for admin approval, for one machine."""
+    """Returns all worker-added knowledge entries still waiting for admin approval, for one machine."""
     results = collection.get(
         where={
             "$and": [
@@ -63,7 +66,7 @@ def get_pending(machine_id: str, authorized: bool = Depends(require_admin)):
 
 @router.post("/approve/{entry_id}")
 def approve_entry(entry_id: str, authorized: bool = Depends(require_admin)):
-    """Marks a pending worker entry as approved, so it becomes searchable in /ask."""
+    """Marks a pending knowledge entry as approved, so it becomes searchable in /ask."""
     existing = collection.get(ids=[entry_id])
     if not existing["ids"]:
         raise HTTPException(status_code=404, detail="Entry not found.")
@@ -77,6 +80,48 @@ def approve_entry(entry_id: str, authorized: bool = Depends(require_admin)):
 
 @router.delete("/delete/{entry_id}")
 def delete_entry(entry_id: str, authorized: bool = Depends(require_admin)):
-    """Permanently deletes an entry (manual chunk or worker entry) by its ID."""
+    """Permanently deletes a knowledge entry (manual chunk or worker entry) by its ID."""
     collection.delete(ids=[entry_id])
     return {"status": "deleted", "id": entry_id}
+
+
+# --- Worker account approval ---
+
+@router.get("/pending-workers")
+def get_pending_workers(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """Returns every worker account still waiting for admin approval."""
+    pending = db.query(Worker).filter(Worker.is_approved == False).all()  # noqa: E712
+    return {
+        "pending_workers": [
+            {"worker_id": w.worker_id, "name": w.name} for w in pending
+        ]
+    }
+
+
+@router.post("/approve-worker/{worker_id}")
+def approve_worker(worker_id: str, authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """Approves a worker's registration, allowing them to log in from now on."""
+    worker = db.query(Worker).filter(Worker.worker_id == worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found.")
+
+    worker.is_approved = True
+    db.commit()
+
+    return {"status": "approved", "worker_id": worker_id, "name": worker.name}
+
+
+@router.delete("/reject-worker/{worker_id}")
+def reject_worker(worker_id: str, authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """Rejects and permanently removes a worker's registration. They would need to register again to retry.
+    Deletes any active sessions for this worker first, since worker_sessions has a foreign key
+    pointing at workers - Postgres won't allow deleting the worker while a session still references it."""
+    worker = db.query(Worker).filter(Worker.worker_id == worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found.")
+
+    db.query(WorkerSession).filter(WorkerSession.worker_id == worker_id).delete()
+    db.delete(worker)
+    db.commit()
+
+    return {"status": "rejected and removed", "worker_id": worker_id}
