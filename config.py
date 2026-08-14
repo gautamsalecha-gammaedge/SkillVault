@@ -15,7 +15,7 @@ load_dotenv()
 # --- Gemini ---
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 EMBEDDING_MODEL = "gemini-embedding-001"
-LLM_MODEL = "gemini-3.6-flash"
+LLM_MODEL = "gemini-3.6-flash1"
 
 # --- Admin credentials (single fixed admin, not a DB table) ---
 ADMIN_USERNAME = os.environ["ADMIN_USERNAME"]
@@ -34,3 +34,13 @@ CHROMA_COLLECTION_NAME = "skillvault_knowledge"
 SARVAM_API_KEY = os.environ["SARVAM_API_KEY"]
 SARVAM_TTS_MODEL = "bulbul:v3"
 SARVAM_TTS_DEFAULT_SPEAKER = "shubh"
+
+# How long generated audio stays cached before it's considered stale and
+# regenerated on next request. Defaults to 24 hours if not set in .env.
+AUDIO_CACHE_TTL_HOURS = int(os.environ.get("AUDIO_CACHE_TTL_HOURS", "24"))
+
+# --- Groq (fallback text-generation provider if Gemini fails) ---
+# Optional - if not set in .env, the app just skips the fallback and
+# surfaces the original Gemini error instead.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = "llama-3.3-70b-versatile"

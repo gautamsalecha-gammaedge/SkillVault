@@ -296,6 +296,7 @@
   document.getElementById("api-base-label").textContent = API_BASE.replace("http://", "");
 
   let mode = "ask"; // "ask" | "add"
+  let pendingClarification = null; // set when waiting on the worker's answer to a clarifying question
   const modeAskBtn = document.getElementById("mode-ask");
   const modeAddBtn = document.getElementById("mode-add");
   const workerFields = document.getElementById("worker-fields");
@@ -390,6 +391,52 @@
   });
 
   // --- Send to backend ---
+  async function saveKnowledge(text, token, machineId, isFallback = false) {
+    const res = await fetch(`${API_BASE}/add-knowledge`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        text: text,
+        machine_id: machineId,
+        language_code: langSelect.value,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Request failed");
+
+    answerLabel.textContent = isFallback ? "Saved (unreviewed)" : "Saved";
+    const note = isFallback
+      ? "\n\n(Saved as-is after a connection hiccup — an admin will double check this one.)"
+      : "";
+    answerText.textContent = `${data.spoken_confirmation}\n\n(${data.status} — ID: ${data.id})${note}`;
+    answerText.dataset.spokenText = data.spoken_confirmation;
+    answerPanel.style.display = "block";
+
+    // Clear the transcript so a stray extra click can't re-submit the same
+    // text as a brand new tip (this was causing an unwanted second
+    // clarifying question if the Send button was clicked twice).
+    transcriptEl.textContent = "Your speech will appear here...";
+    transcriptEl.classList.add("empty");
+    goBtn.disabled = true;
+  }
+
+  async function runKnowledgeCheck(text, machineId, token, round) {
+    const res = await fetch(`${API_BASE}/add-knowledge/check`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify({ text: text, machine_id: machineId, round: round }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Check failed");
+    return data;
+  }
+
   goBtn.addEventListener("click", async () => {
     const text = transcriptEl.textContent.trim();
     if (!text) return;
@@ -399,8 +446,8 @@
     goBtn.textContent = "Working…";
     answerPanel.style.display = "none";
 
-    try {
-      if (mode === "ask") {
+    if (mode === "ask") {
+      try {
         const res = await fetch(`${API_BASE}/ask`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -411,41 +458,79 @@
 
         answerLabel.textContent = `Answer (sources used: ${data.sources_used ?? 0})`;
         answerText.textContent = data.answer;
+        answerText.dataset.spokenText = data.answer;
         answerPanel.style.display = "block";
-      } else {
-        const token = workerTokenInput.value.trim();
-        if (!token) {
-          alert("Paste a worker Bearer token first (get one from POST /worker/login in /docs).");
-          return;
-        }
-        const res = await fetch(`${API_BASE}/add-knowledge`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({ text: text, machine_id: machineId }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Request failed");
-
-        answerLabel.textContent = "Saved";
-        answerText.textContent = `${data.status}\nAdded by: ${data.added_by}\nID: ${data.id}`;
+      } catch (err) {
+        answerLabel.textContent = "Error";
+        answerText.textContent = err.message;
         answerPanel.style.display = "block";
       }
-    } catch (err) {
-      answerLabel.textContent = "Error";
-      answerText.textContent = err.message;
-      answerPanel.style.display = "block";
-    } finally {
-      goBtn.disabled = false;
-      goBtn.textContent = mode === "ask" ? "Send" : "Submit knowledge";
+    } else {
+      const token = workerTokenInput.value.trim();
+      if (!token) {
+        alert("Paste a worker Bearer token first (get one from POST /worker/login in /docs).");
+        goBtn.disabled = false;
+        goBtn.textContent = "Submit knowledge";
+        return;
+      }
+
+      try {
+        if (pendingClarification) {
+          // Worker is answering the one clarifying question - this is round 2,
+          // always forced complete by the backend regardless of the model's opinion.
+          const combinedText = `${pendingClarification.originalText} ${text}`;
+          const round = pendingClarification.round + 1;
+          const checkData = await runKnowledgeCheck(combinedText, machineId, token, round);
+          pendingClarification = null;
+          await saveKnowledge(checkData.polished_text || combinedText, token, machineId);
+        } else {
+          // First pass.
+          const checkData = await runKnowledgeCheck(text, machineId, token, 1);
+
+          if (checkData.complete) {
+            await saveKnowledge(checkData.polished_text || text, token, machineId);
+          } else {
+            pendingClarification = { originalText: text, round: 1 };
+            answerLabel.textContent = "One more thing…";
+            answerText.textContent = checkData.question;
+            answerText.dataset.spokenText = checkData.question;
+            answerPanel.style.display = "block";
+
+            // Clear the transcript box so the worker's next recording is
+            // treated as the answer to this question, not a new tip.
+            transcriptEl.textContent = "Your speech will appear here...";
+            transcriptEl.classList.add("empty");
+            goBtn.disabled = true;
+            goBtn.textContent = "Submit knowledge";
+            return; // don't fall through to the finally-style reset below
+          }
+        }
+      } catch (err) {
+        // Never lose the worker's words - if the check/polish step fails for
+        // any reason (network hiccup, provider outage), save the raw text
+        // directly instead of showing an error and discarding it.
+        console.error("Check step failed, saving raw text as a fallback:", err);
+        const fallbackText = pendingClarification
+          ? `${pendingClarification.originalText} ${text}`
+          : text;
+        pendingClarification = null;
+        try {
+          await saveKnowledge(fallbackText, token, machineId, true);
+        } catch (saveErr) {
+          answerLabel.textContent = "Error";
+          answerText.textContent = saveErr.message;
+          answerPanel.style.display = "block";
+        }
+      }
     }
+
+    goBtn.disabled = transcriptEl.classList.contains("empty");
+    goBtn.textContent = mode === "ask" ? "Send" : "Submit knowledge";
   });
 
   // --- Text-to-speech via Sarvam (proper Indian accent, regardless of local OS voices) ---
   speakBtn.addEventListener("click", async () => {
-    const text = answerText.textContent.trim();
+    const text = (answerText.dataset.spokenText || answerText.textContent).trim();
     if (!text) return;
 
     speakBtn.disabled = true;
