@@ -15,7 +15,7 @@ load_dotenv()
 # --- Gemini ---
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 EMBEDDING_MODEL = "gemini-embedding-001"
-LLM_MODEL = "gemini-3.6-flash1"
+LLM_MODEL = "gemini-3.6-flash"
 
 # --- Admin credentials (single fixed admin, not a DB table) ---
 ADMIN_USERNAME = os.environ["ADMIN_USERNAME"]
