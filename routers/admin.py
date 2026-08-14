@@ -19,9 +19,13 @@ from models import AdminSession, Worker , WorkerSession
 from schemas import AdminLoginRequest
 from auth.security import make_expiry_time
 from auth.admin_auth import require_admin
-from rag.chroma_store import collection
+from rag.chroma_store import collection , list_manuals, delete_manual
 from config import ADMIN_USERNAME, ADMIN_PASSWORD, TOKEN_EXPIRY_HOURS
 
+import tempfile
+import os
+from fastapi import UploadFile, File, Form
+from ingest import ingest_pdf
 router = APIRouter(prefix="/admin",tags=["Admin"])
 
 
@@ -125,3 +129,59 @@ def reject_worker(worker_id: str, authorized: bool = Depends(require_admin), db:
     db.commit()
 
     return {"status": "rejected and removed", "worker_id": worker_id}
+
+
+# --- Manual management (upload / list / delete) ---
+
+@router.post("/upload-manual/")
+def upload_manual(
+    machine_id: str = Form(...),
+    file: UploadFile = File(...),
+    authorized: bool = Depends(require_admin),
+):
+    """
+    Admin uploads a PDF manual for a machine, via Swagger's file picker
+    or eventually a drag-and-drop frontend. If a manual with this exact
+    filename already exists for this machine_id, its old chunks are
+    replaced (override) rather than duplicated - so re-uploading the
+    same file name cleanly updates it.
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(file.file.read())
+        tmp_path = tmp.name
+
+    try:
+        chunk_count = ingest_pdf(tmp_path, machine_id, filename=file.filename, override=True)
+    finally:
+        os.remove(tmp_path)
+
+    return {
+        "status": "uploaded and ingested",
+        "machine_id": machine_id,
+        "filename": file.filename,
+        "chunks_created": chunk_count,
+    }
+
+
+@router.get("/manuals")
+def get_manuals(machine_id: str, authorized: bool = Depends(require_admin)):
+    """Lists every manual currently ingested for one machine, with each one's chunk count."""
+    return {"machine_id": machine_id, "manuals": list_manuals(machine_id)}
+
+
+@router.delete("/manual")
+def remove_manual(machine_id: str, filename: str, authorized: bool = Depends(require_admin)):
+    """Deletes one manual's chunks entirely, for one machine - removes it from the knowledge base."""
+    removed = delete_manual(machine_id, filename)
+    if removed == 0:
+        raise HTTPException(status_code=404, detail="No chunks found for that machine_id and filename combination.")
+
+    return {
+        "status": "deleted",
+        "machine_id": machine_id,
+        "filename": filename,
+        "chunks_removed": removed,
+    }
