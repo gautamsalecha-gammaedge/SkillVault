@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SkillVault</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="center-screen">
+  <div style="width: 100%; max-width: 460px;">
+
+    <!-- ============ STEP 1: Language picker ============ -->
+    <div id="step-language">
+      <div style="text-align: center; margin-bottom: 32px;">
+        <h1 style="font-size: 2.2rem;">SkillVault</h1>
+      </div>
+      <div class="card" style="padding: 28px;">
+        <div id="lang-heading" style="text-align: center; margin-bottom: 20px; color: var(--text-dim); font-size: 0.95rem;">
+          Choose your language
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <button class="btn-large-tile" data-lang="en-IN" style="min-height: 90px;">
+            <span class="tile-label" style="font-size: 1.3rem;">English</span>
+          </button>
+          <button class="btn-large-tile" data-lang="hi-IN" style="min-height: 90px;">
+            <span class="tile-label" style="font-size: 1.3rem;">हिंदी</span>
+          </button>
+          <button class="btn-large-tile" data-lang="mr-IN" style="min-height: 90px;">
+            <span class="tile-label" style="font-size: 1.3rem;">मराठी</span>
+          </button>
+          <button class="btn-large-tile" data-lang="ta-IN" style="min-height: 90px;">
+            <span class="tile-label" style="font-size: 1.3rem;">தமிழ்</span>
+          </button>
+          <button class="btn-large-tile" data-lang="ur-IN" style="min-height: 90px; grid-column: span 2;">
+            <span class="tile-label" style="font-size: 1.3rem;">اردو</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ STEP 2: Role selection ============ -->
+    <div id="step-role" class="hidden">
+      <div style="text-align: center; margin-bottom: 28px;">
+        <h1 id="app-name-role" style="font-size: 2rem;">SkillVault</h1>
+        <div id="who-are-you" class="help-text" style="margin-top: 8px; font-size: 1.05rem;">Who are you?</div>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <button class="btn-large-tile" id="role-worker">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2 3 7v6c0 5 3.8 8.7 9 9 5.2-.3 9-4 9-9V7l-9-5Z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+          <span class="tile-label" id="role-worker-label">Worker</span>
+          <span class="tile-sublabel" id="role-worker-sub">Ask questions, share tips</span>
+        </button>
+        <button class="btn-large-tile" id="role-admin">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+          </svg>
+          <span class="tile-label" id="role-admin-label">Admin</span>
+          <span class="tile-sublabel" id="role-admin-sub">Review and manage</span>
+        </button>
+      </div>
+      <button class="btn btn-secondary" id="back-to-lang" style="width: 100%; margin-top: 20px;">← <span id="back-label-1">Back</span></button>
+    </div>
+
+    <!-- ============ STEP 3a: Worker login ============ -->
+    <div id="step-worker-login" class="hidden card" style="padding: 28px;">
+      <h2 id="worker-login-title" style="font-size: 1.5rem; margin-bottom: 24px;">Worker Login</h2>
+      <div class="field">
+        <label id="label-worker-id">Worker ID</label>
+        <input type="text" id="wl-worker-id" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label id="label-worker-pw">Password</label>
+        <input type="password" id="wl-password" autocomplete="current-password" />
+      </div>
+      <div id="worker-login-error" class="error-text hidden"></div>
+      <button class="btn btn-primary" id="worker-login-submit" style="width: 100%; margin-top: 8px;">Log In</button>
+      <button class="btn btn-secondary" id="go-to-register" style="width: 100%; margin-top: 12px;">New worker? Register here</button>
+      <button class="btn btn-secondary" id="back-to-role-1" style="width: 100%; margin-top: 12px;">← Back</button>
+    </div>
+
+    <!-- ============ STEP 3b: Worker register ============ -->
+    <div id="step-worker-register" class="hidden card" style="padding: 28px;">
+      <h2 id="worker-register-title" style="font-size: 1.5rem; margin-bottom: 24px;">Worker Registration</h2>
+      <div class="field">
+        <label id="label-reg-id">Worker ID</label>
+        <input type="text" id="wr-worker-id" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label id="label-reg-name">Your Name</label>
+        <input type="text" id="wr-name" autocomplete="name" />
+      </div>
+      <div class="field">
+        <label id="label-reg-pw">Password</label>
+        <input type="password" id="wr-password" autocomplete="new-password" />
+      </div>
+      <div id="worker-register-error" class="error-text hidden"></div>
+      <div id="worker-register-success" class="hidden" style="color: var(--green); font-size: 0.95rem; margin-top: 8px;"></div>
+      <button class="btn btn-primary" id="worker-register-submit" style="width: 100%; margin-top: 8px;">Register</button>
+      <button class="btn btn-secondary" id="go-to-login" style="width: 100%; margin-top: 12px;">Already registered? Log in</button>
+    </div>
+
+    <!-- ============ STEP 3c: Admin login ============ -->
+    <div id="step-admin-login" class="hidden card" style="padding: 28px;">
+      <h2 id="admin-login-title" style="font-size: 1.5rem; margin-bottom: 24px;">Admin Login</h2>
+      <div class="field">
+        <label id="label-admin-user">Username</label>
+        <input type="text" id="al-username" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label id="label-admin-pw">Password</label>
+        <input type="password" id="al-password" autocomplete="current-password" />
+      </div>
+      <div id="admin-login-error" class="error-text hidden"></div>
+      <button class="btn btn-primary" id="admin-login-submit" style="width: 100%; margin-top: 8px;">Log In</button>
+      <button class="btn btn-secondary" id="back-to-role-2" style="width: 100%; margin-top: 12px;">← Back</button>
+    </div>
+
+  </div>
+</div>
+
+<script src="i18n.js"></script>
+<script>
+  const API_BASE = "http://127.0.0.1:8000";
+
+  const steps = {
+    language: document.getElementById("step-language"),
+    role: document.getElementById("step-role"),
+    workerLogin: document.getElementById("step-worker-login"),
+    workerRegister: document.getElementById("step-worker-register"),
+    adminLogin: document.getElementById("step-admin-login"),
+  };
+
+  function showStep(name) {
+    Object.values(steps).forEach(el => el.classList.add("hidden"));
+    steps[name].classList.remove("hidden");
+  }
+
+  function applyTranslations() {
+    applyLanguageDirection();
+    document.getElementById("lang-heading").textContent = t("chooseLanguage");
+    document.getElementById("app-name-role").textContent = t("appName");
+    document.getElementById("who-are-you").textContent = t("whoAreYou");
+    document.getElementById("role-worker-label").textContent = t("worker");
+    document.getElementById("role-worker-sub").textContent = t("workerSub");
+    document.getElementById("role-admin-label").textContent = t("admin");
+    document.getElementById("role-admin-sub").textContent = t("adminSub");
+    document.getElementById("back-label-1").textContent = t("back");
+
+    document.getElementById("worker-login-title").textContent = t("loginTitle");
+    document.getElementById("label-worker-id").textContent = t("workerId");
+    document.getElementById("label-worker-pw").textContent = t("password");
+    document.getElementById("worker-login-submit").textContent = t("login");
+    document.getElementById("go-to-register").textContent = t("newWorker");
+    document.getElementById("back-to-role-1").innerHTML = "← " + t("back");
+
+    document.getElementById("worker-register-title").textContent = t("registerTitle");
+    document.getElementById("label-reg-id").textContent = t("workerId");
+    document.getElementById("label-reg-name").textContent = t("name");
+    document.getElementById("label-reg-pw").textContent = t("password");
+    document.getElementById("worker-register-submit").textContent = t("register");
+    document.getElementById("go-to-login").textContent = t("haveAccount");
+
+    document.getElementById("admin-login-title").textContent = t("adminLoginTitle");
+    document.getElementById("label-admin-user").textContent = t("username");
+    document.getElementById("label-admin-pw").textContent = t("password");
+    document.getElementById("admin-login-submit").textContent = t("login");
+    document.getElementById("back-to-role-2").innerHTML = "← " + t("back");
+  }
+
+  // --- Step 1: language selection ---
+  document.querySelectorAll("[data-lang]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      localStorage.setItem("sv_language", btn.dataset.lang);
+      applyTranslations();
+      showStep("role");
+    });
+  });
+
+  // --- Step 2: role selection ---
+  document.getElementById("back-to-lang").addEventListener("click", () => showStep("language"));
+  document.getElementById("role-worker").addEventListener("click", () => showStep("workerLogin"));
+  document.getElementById("role-admin").addEventListener("click", () => showStep("adminLogin"));
+
+  // --- Step 3: navigation between login/register/back ---
+  document.getElementById("back-to-role-1").addEventListener("click", () => showStep("role"));
+  document.getElementById("back-to-role-2").addEventListener("click", () => showStep("role"));
+  document.getElementById("go-to-register").addEventListener("click", () => showStep("workerRegister"));
+  document.getElementById("go-to-login").addEventListener("click", () => showStep("workerLogin"));
+
+  function showError(elId, message) {
+    const el = document.getElementById(elId);
+    el.textContent = message;
+    el.classList.remove("hidden");
+  }
+  function hideError(elId) {
+    document.getElementById(elId).classList.add("hidden");
+  }
+
+  // --- Worker login ---
+  document.getElementById("worker-login-submit").addEventListener("click", async () => {
+    hideError("worker-login-error");
+    const worker_id = document.getElementById("wl-worker-id").value.trim();
+    const password = document.getElementById("wl-password").value;
+    if (!worker_id || !password) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/worker/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ worker_id, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (res.status === 403) showError("worker-login-error", t("pendingApproval"));
+        else if (data.detail && data.detail.includes("not found")) showError("worker-login-error", t("notFound"));
+        else if (res.status === 401) showError("worker-login-error", t("wrongPassword"));
+        else showError("worker-login-error", t("genericError"));
+        return;
+      }
+
+      localStorage.setItem("sv_token", data.token);
+      localStorage.setItem("sv_role", "worker");
+      localStorage.setItem("sv_name", data.name);
+      localStorage.setItem("sv_worker_id", worker_id);
+      window.location.href = "worker.html";
+    } catch (err) {
+      showError("worker-login-error", t("genericError"));
+    }
+  });
+
+  // --- Worker register ---
+  document.getElementById("worker-register-submit").addEventListener("click", async () => {
+    hideError("worker-register-error");
+    document.getElementById("worker-register-success").classList.add("hidden");
+
+    const worker_id = document.getElementById("wr-worker-id").value.trim();
+    const name = document.getElementById("wr-name").value.trim();
+    const password = document.getElementById("wr-password").value;
+    if (!worker_id || !name || !password) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/worker/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ worker_id, name, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.detail && data.detail.includes("already registered")) showError("worker-register-error", t("alreadyRegistered"));
+        else showError("worker-register-error", t("genericError"));
+        return;
+      }
+
+      const successEl = document.getElementById("worker-register-success");
+      successEl.textContent = t("registeredWaiting");
+      successEl.classList.remove("hidden");
+    } catch (err) {
+      showError("worker-register-error", t("genericError"));
+    }
+  });
+
+  // --- Admin login ---
+  document.getElementById("admin-login-submit").addEventListener("click", async () => {
+    hideError("admin-login-error");
+    const username = document.getElementById("al-username").value.trim();
+    const password = document.getElementById("al-password").value;
+    if (!username || !password) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        showError("admin-login-error", t("genericError"));
+        return;
+      }
+
+      localStorage.setItem("sv_token", data.token);
+      localStorage.setItem("sv_role", "admin");
+      window.location.href = "admin.html";
+    } catch (err) {
+      showError("admin-login-error", t("genericError"));
+    }
+  });
+
+  // --- Init ---
+  if (!localStorage.getItem("sv_language")) {
+    localStorage.setItem("sv_language", "en-IN");
+  }
+  applyTranslations();
+</script>
+
+</body>
+</html>

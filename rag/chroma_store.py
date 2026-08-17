@@ -59,3 +59,13 @@ def delete_manual(machine_id: str, filename: str) -> int:
     if ids_to_delete:
         collection.delete(ids=ids_to_delete)
     return len(ids_to_delete)
+
+def list_all_machine_ids() -> list[str]:
+    """
+    Returns every distinct machine_id that has at least one manual chunk
+    ingested - used to populate the admin's machine-assignment dropdown,
+    so admin picks from machines that actually exist rather than typing
+    a machine_id freehand.
+    """
+    results = collection.get(where={"source_type": "manual"})
+    return sorted(set(m.get("machine_id") for m in results["metadatas"] if m.get("machine_id")))

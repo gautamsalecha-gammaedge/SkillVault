@@ -40,3 +40,14 @@ class AdminSession(Base):
 
     token = Column(String, primary_key=True)
     expires_at = Column(DateTime, nullable=False)
+
+class WorkerMachine(Base):
+    """
+    One row per (worker, machine) assignment - which machines a worker is
+    allowed to see and use. Composite primary key naturally prevents the
+    same machine being assigned twice to the same worker.
+    """
+    __tablename__ = "worker_machines"
+
+    worker_id = Column(String, ForeignKey("workers.worker_id"), primary_key=True)
+    machine_id = Column(String, primary_key=True)

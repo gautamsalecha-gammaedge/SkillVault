@@ -12,10 +12,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from db import get_db
-from models import Worker, WorkerSession
+from models import Worker, WorkerSession , WorkerMachine
 from schemas import WorkerRegisterRequest, WorkerLoginRequest
 from auth.security import hash_password, make_expiry_time
 from config import TOKEN_EXPIRY_HOURS
+from auth.worker_auth import require_worker
 
 router = APIRouter(prefix="/worker" , tags=["worker"])
 
@@ -69,3 +70,9 @@ def worker_login(req: WorkerLoginRequest, db: Session = Depends(get_db)):
         "expires_in_hours": TOKEN_EXPIRY_HOURS,
         "message": "Login successful. Use this token in the Authorization header as 'Bearer <token>'.",
     }
+
+@router.get("/my-machines")
+def my_machines(worker: dict = Depends(require_worker), db: Session = Depends(get_db)):
+    """Returns only the machines THIS logged-in worker has been assigned by admin."""
+    assignments = db.query(WorkerMachine).filter(WorkerMachine.worker_id == worker["worker_id"]).all()
+    return {"machine_ids": [a.machine_id for a in assignments]}

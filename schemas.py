@@ -46,3 +46,7 @@ class WorkerRegisterRequest(BaseModel):
 class WorkerLoginRequest(BaseModel):
     worker_id: str
     password: str
+
+class AssignMachineRequest(BaseModel):
+    worker_id: str
+    machine_id: str

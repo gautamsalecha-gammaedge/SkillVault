@@ -15,11 +15,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from db import get_db
-from models import AdminSession, Worker , WorkerSession
-from schemas import AdminLoginRequest
+from models import AdminSession, Worker , WorkerSession , WorkerMachine
+from schemas import AdminLoginRequest , AssignMachineRequest
 from auth.security import make_expiry_time
 from auth.admin_auth import require_admin
-from rag.chroma_store import collection , list_manuals, delete_manual
+from rag.chroma_store import collection , list_manuals, delete_manual , list_all_machine_ids
 from config import ADMIN_USERNAME, ADMIN_PASSWORD, TOKEN_EXPIRY_HOURS
 
 import tempfile
@@ -88,6 +88,17 @@ def delete_entry(entry_id: str, authorized: bool = Depends(require_admin)):
     collection.delete(ids=[entry_id])
     return {"status": "deleted", "id": entry_id}
 
+@router.get("/workers")
+def get_all_workers(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """Returns every registered worker, approved or not - used to populate
+    the admin's worker list/dropdown when assigning machines."""
+    workers = db.query(Worker).all()
+    return {
+        "workers": [
+            {"worker_id": w.worker_id, "name": w.name, "is_approved": w.is_approved}
+            for w in workers
+        ]
+    }
 
 # --- Worker account approval ---
 
@@ -185,3 +196,53 @@ def remove_manual(machine_id: str, filename: str, authorized: bool = Depends(req
         "filename": filename,
         "chunks_removed": removed,
     }
+
+
+# --- Machine assignment ---
+
+@router.get("/all-machines")
+def get_all_machines(authorized: bool = Depends(require_admin)):
+    """Lists every machine_id that has at least one manual uploaded - for the assignment dropdown."""
+    return {"machine_ids": list_all_machine_ids()}
+
+
+@router.post("/assign-machine")
+def assign_machine(req: AssignMachineRequest, authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """Grants a worker access to one machine. Safe to call again for an already-assigned pair (no duplicate error)."""
+    worker = db.query(Worker).filter(Worker.worker_id == req.worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found.")
+
+    existing = db.query(WorkerMachine).filter(
+        WorkerMachine.worker_id == req.worker_id,
+        WorkerMachine.machine_id == req.machine_id,
+    ).first()
+    if existing:
+        return {"status": "already assigned", "worker_id": req.worker_id, "machine_id": req.machine_id}
+
+    db.add(WorkerMachine(worker_id=req.worker_id, machine_id=req.machine_id))
+    db.commit()
+
+    return {"status": "assigned", "worker_id": req.worker_id, "machine_id": req.machine_id}
+
+
+@router.delete("/unassign-machine")
+def unassign_machine(worker_id: str, machine_id: str, authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """Revokes a worker's access to one machine."""
+    deleted = db.query(WorkerMachine).filter(
+        WorkerMachine.worker_id == worker_id,
+        WorkerMachine.machine_id == machine_id,
+    ).delete()
+    db.commit()
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="That worker/machine assignment doesn't exist.")
+
+    return {"status": "unassigned", "worker_id": worker_id, "machine_id": machine_id}
+
+
+@router.get("/worker-machines/{worker_id}")
+def get_worker_machines(worker_id: str, authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """Lists every machine currently assigned to one worker - for the admin assignment screen."""
+    assignments = db.query(WorkerMachine).filter(WorkerMachine.worker_id == worker_id).all()
+    return {"worker_id": worker_id, "machine_ids": [a.machine_id for a in assignments]}
