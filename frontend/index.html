@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en-IN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>SkillVault — Log in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Noto+Sans:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans+Tamil:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/base.css" />
+<link rel="stylesheet" href="css/components.css" />
+<link rel="stylesheet" href="css/login.css" />
+</head>
+<body>
+
+<div class="auth-shell">
+  <div class="auth-card card">
+    <div class="andon" aria-hidden="true">
+      <span class="led led--amber is-active"></span>
+      <span class="led led--green is-active"></span>
+      <span class="led led--amber is-active"></span>
+    </div>
+
+    <div class="auth-body">
+      <div class="auth-brand">
+        <div class="mark">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6l-8-4z" stroke="#17130a" stroke-width="2" stroke-linejoin="round" fill="none"/><path d="M9 12l2 2 4-4" stroke="#17130a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h1 data-i18n="appName">SkillVault</h1>
+        <p data-i18n="tagline">Shop-floor knowledge, on demand</p>
+      </div>
+
+      <!-- STEP 1: language -->
+      <div class="step is-active" id="step-lang">
+        <div class="step-title" data-i18n="selectLanguage">Choose your language</div>
+        <div class="option-grid" id="lang-list"></div>
+      </div>
+
+      <!-- STEP 2: role -->
+      <div class="step" id="step-role">
+        <button class="auth-back" data-back="step-lang">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+          <span data-i18n="back">Back</span>
+        </button>
+        <div class="step-title" data-i18n="selectRole">Who's logging in?</div>
+        <div class="option-grid">
+          <button class="option-tile" id="role-worker">
+            <span class="tile-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 12a4 4 0 100-8 4 4 0 000 8z"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            </span>
+            <span class="tile-text">
+              <strong data-i18n="roleWorker">Shop-floor worker</strong>
+              <span data-i18n="roleWorkerHint">Ask questions, share tips</span>
+            </span>
+          </button>
+          <button class="option-tile" id="role-admin">
+            <span class="tile-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-4z"/></svg>
+            </span>
+            <span class="tile-text">
+              <strong data-i18n="roleAdmin">Admin</strong>
+              <span data-i18n="roleAdminHint">Approve, manage, upload manuals</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- STEP 3: worker auth -->
+      <div class="step" id="step-worker">
+        <button class="auth-back" data-back="step-role">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+          <span data-i18n="back">Back</span>
+        </button>
+
+        <div class="auth-tabs" role="tablist">
+          <button class="auth-tab" role="tab" aria-selected="true" id="tab-login" data-i18n="workerLoginTab">Log in</button>
+          <button class="auth-tab" role="tab" aria-selected="false" id="tab-register" data-i18n="workerRegisterTab">Register</button>
+        </div>
+
+        <div class="form-error" id="worker-error" role="alert"></div>
+
+        <form id="form-worker-login" novalidate>
+          <div class="field" style="margin-bottom:14px;">
+            <label for="login-worker-id" data-i18n="workerIdLabel">Worker ID</label>
+            <input class="input" id="login-worker-id" name="worker_id" autocomplete="username" required />
+          </div>
+          <div class="field" style="margin-bottom:8px;">
+            <label for="login-password" data-i18n="passwordLabel">Password</label>
+            <input class="input" id="login-password" name="password" type="password" autocomplete="current-password" required />
+          </div>
+          <p class="field-hint" data-i18n="workerIdHint" style="margin-bottom:16px;">Ask your supervisor if you don't have one</p>
+          <button class="btn btn--primary btn--lg btn--block" type="submit" id="btn-worker-login">
+            <span data-i18n="loginBtn">Log in</span>
+          </button>
+        </form>
+
+        <form id="form-worker-register" style="display:none;" novalidate>
+          <div class="field" style="margin-bottom:14px;">
+            <label for="reg-name" data-i18n="nameLabel">Full name</label>
+            <input class="input" id="reg-name" name="name" autocomplete="name" required />
+          </div>
+          <div class="field" style="margin-bottom:14px;">
+            <label for="reg-worker-id" data-i18n="workerIdLabel">Worker ID</label>
+            <input class="input" id="reg-worker-id" name="worker_id" autocomplete="username" required />
+          </div>
+          <div class="field" style="margin-bottom:16px;">
+            <label for="reg-password" data-i18n="passwordLabel">Password</label>
+            <input class="input" id="reg-password" name="password" type="password" autocomplete="new-password" required />
+          </div>
+          <button class="btn btn--primary btn--lg btn--block" type="submit" id="btn-worker-register">
+            <span data-i18n="registerBtn">Create account</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- STEP 4: admin auth -->
+      <div class="step" id="step-admin">
+        <button class="auth-back" data-back="step-role">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+          <span data-i18n="back">Back</span>
+        </button>
+        <div class="step-title" data-i18n="roleAdmin">Admin</div>
+
+        <div class="form-error" id="admin-error" role="alert"></div>
+
+        <form id="form-admin-login" novalidate>
+          <div class="field" style="margin-bottom:14px;">
+            <label for="admin-username" data-i18n="adminUsernameLabel">Admin username</label>
+            <input class="input" id="admin-username" name="username" autocomplete="username" required />
+          </div>
+          <div class="field" style="margin-bottom:16px;">
+            <label for="admin-password" data-i18n="adminPasswordLabel">Admin password</label>
+            <input class="input" id="admin-password" name="password" type="password" autocomplete="current-password" required />
+          </div>
+          <button class="btn btn--primary btn--lg btn--block" type="submit" id="btn-admin-login">
+            <span data-i18n="adminLoginBtn">Log in</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- STEP 5: registration success -->
+      <div class="step" id="step-registered">
+        <div class="success-panel">
+          <div class="icon-circle">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <h3 data-i18n="registerSuccessTitle">Registration received</h3>
+          <p data-i18n="registerSuccessBody">An admin needs to approve your account before you can log in.</p>
+          <button class="btn btn--primary" id="btn-back-to-login" data-i18n="backToLogin">Back to log in</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="js/i18n.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/toast.js"></script>
+<script src="js/api.js"></script>
+<script src="js/login.js"></script>
+</body>
+</html>

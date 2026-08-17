@@ -21,17 +21,43 @@ etc.) - corrupting the knowledge base into a mixed-up mess of both files.
 Including the filename in the ID makes each file's chunks land at their
 own unique IDs, so different manuals never collide.
 
+Reliability notes (added after a 170-page manual crashed at chunk 81/820
+with a Gemini 503 mid-ingestion):
+- Each chunk's embedding call now retries with exponential backoff
+  (embed_text_with_retry) instead of relying only on the SDK's thin
+  built-in retry, since Gemini's embedding endpoint can be transiently
+  unavailable for longer than that covers under sustained sequential load.
+- A small pause between chunks paces the requests so we're not hammering
+  the endpoint back-to-back for hundreds of calls in a row.
+- If a chunk still fails after all retries, we do NOT leave a half-ingested
+  manual sitting in Chroma (e.g. 80/820 chunks "successfully" saved, with
+  no indication anything is wrong). We roll back everything saved so far
+  for this manual and raise a clear error, so the admin sees a clean
+  failure and can just retry the upload.
+
 Usage:
     python ingest.py path/to/manual.pdf CNC-204
 """
 
 import re
 import sys
+import time
 from pathlib import Path
 
-from rag.embeddings import embed_text
+from rag.embeddings import embed_text_with_retry
 from rag.chroma_store import collection, delete_manual
 from rag.chunking import extract_text_from_pdf, chunk_text
+
+# Small pause between successive embedding calls during bulk ingestion,
+# to avoid hammering Gemini's endpoint with hundreds of back-to-back
+# requests. Cheap insurance against triggering the overload in the first
+# place, not just reacting to it after the fact.
+PACE_DELAY_SECONDS = 0.15
+
+
+class IngestionError(Exception):
+    """Raised when a manual fails to fully ingest after retries."""
+    pass
 
 
 def slugify_filename(filename: str) -> str:
@@ -55,6 +81,11 @@ def ingest_pdf(pdf_path: str, machine_id: str, filename: str = None, override: b
               together.
 
     Returns the number of chunks created.
+
+    Raises IngestionError if embedding fails partway through even after
+    retries - in that case, any chunks already saved for THIS manual in
+    THIS run are rolled back first, so you never end up with a manual
+    that's silently only partially searchable.
     """
     if filename is None:
         filename = Path(pdf_path).name
@@ -74,20 +105,43 @@ def ingest_pdf(pdf_path: str, machine_id: str, filename: str = None, override: b
     safe_name = slugify_filename(filename)
 
     print("Embedding and saving each chunk ...")
-    for i, chunk in enumerate(chunks):
-        embedding = embed_text(chunk, task_type="RETRIEVAL_DOCUMENT")
-        collection.upsert(
-            ids=[f"{machine_id}-{safe_name}-chunk-{i}"],
-            embeddings=[embedding],
-            documents=[chunk],
-            metadatas=[{
-                "machine_id": machine_id,
-                "source_type": "manual",
-                "status": "approved",
-                "manual_filename": filename,
-            }],
+    saved_ids = []
+
+    try:
+        for i, chunk in enumerate(chunks):
+            embedding = embed_text_with_retry(chunk, task_type="RETRIEVAL_DOCUMENT")
+
+            chunk_id = f"{machine_id}-{safe_name}-chunk-{i}"
+            collection.upsert(
+                ids=[chunk_id],
+                embeddings=[embedding],
+                documents=[chunk],
+                metadatas=[{
+                    "machine_id": machine_id,
+                    "source_type": "manual",
+                    "status": "approved",
+                    "manual_filename": filename,
+                }],
+            )
+            saved_ids.append(chunk_id)
+            print(f"  Saved chunk {i + 1}/{len(chunks)}")
+
+            if i < len(chunks) - 1:
+                time.sleep(PACE_DELAY_SECONDS)
+
+    except Exception as e:
+        print(
+            f"Ingestion failed at chunk {len(saved_ids) + 1}/{len(chunks)} "
+            f"after retries were exhausted: {e}"
         )
-        print(f"  Saved chunk {i + 1}/{len(chunks)}")
+        print(f"Rolling back {len(saved_ids)} chunk(s) already saved for '{filename}' ...")
+        removed = delete_manual(machine_id, filename)
+        print(f"Rolled back {removed} chunk(s). '{filename}' is NOT in the knowledge base.")
+        raise IngestionError(
+            f"Failed to ingest '{filename}' - Gemini's embedding service was "
+            f"unavailable even after retries. No partial data was left behind; "
+            f"you can safely retry the upload. (Underlying error: {e})"
+        ) from e
 
     print(f"Done. '{filename}' is now searchable for machine: {machine_id}")
     return len(chunks)
