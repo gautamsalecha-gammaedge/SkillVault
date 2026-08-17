@@ -237,95 +237,169 @@
   }
 
   /* ================= KNOWLEDGE REVIEW ================= */
-  const knowledgeMachineSelect = document.getElementById("knowledge-machine-select");
-  const knowledgeList = document.getElementById("knowledge-list");
-  const countKnowledge = document.getElementById("count-knowledge");
+  /* ================= KNOWLEDGE REVIEW ================= */
+const knowledgeMachineSelect = document.getElementById("knowledge-machine-select");
+const knowledgeList = document.getElementById("knowledge-list");
+const countKnowledge = document.getElementById("count-knowledge");
+const ttsAudioAdmin = document.getElementById("tts-audio-admin");
+const ALL_MACHINES_VALUE = "__all__";
 
-  async function loadKnowledgeMachines() {
-    try {
-      const res = await Api.allMachines();
-      const machines = res.machine_ids || [];
-      knowledgeMachineSelect.innerHTML = machines.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
-      if (machines.length) {
-        loadKnowledgeEntries(machines[0]);
-      } else {
-        knowledgeList.innerHTML = emptyState(t("knowledgeEmpty"), iconDoc());
-      }
-    } catch (err) {
-      showToast(err.message || t("toastErrorGeneric"), "error");
-    }
+let knowledgeMachinesCache = [];
+
+async function speakText(text, btnEl) {
+  const original = btnEl.innerHTML;
+  btnEl.disabled = true;
+  btnEl.innerHTML = `<span class="spinner"></span>`;
+  try {
+    const { blob } = await Api.speak(text, typeof getLang === "function" ? getLang() : "en");
+    const url = URL.createObjectURL(blob);
+    ttsAudioAdmin.src = url;
+    await ttsAudioAdmin.play();
+    ttsAudioAdmin.onended = () => {
+      btnEl.disabled = false;
+      btnEl.innerHTML = original;
+      URL.revokeObjectURL(url);
+    };
+  } catch (err) {
+    showToast(err.message || t("errorGeneric"), "error");
+    btnEl.disabled = false;
+    btnEl.innerHTML = original;
   }
-  knowledgeMachineSelect.addEventListener("change", () => loadKnowledgeEntries(knowledgeMachineSelect.value));
+}
 
-  async function loadKnowledgeEntries(machine_id) {
-    if (!machine_id) return;
-    knowledgeList.innerHTML = skeletonRows(2);
-    try {
-      const res = await Api.pendingEntries(machine_id);
-      const entries = res.pending_entries || [];
-      countKnowledge.textContent = entries.length;
-      if (!entries.length) {
-        knowledgeList.innerHTML = emptyState(t("knowledgeEmpty"), iconDoc());
-        return;
-      }
-      knowledgeList.innerHTML = entries
-        .map(
-          (en) => `
-        <div class="card entry-card" data-entry-id="${escapeHtml(en.id)}">
-          <p class="entry-text">${escapeHtml(en.text)}</p>
-          <div class="entry-meta">
-            <span class="sub">${t("submittedBy", { name: en.worker_name || en.worker_id || "—" })}</span>
-            <div class="entry-actions">
-              <button class="btn btn--success btn--sm" data-approve-entry>${t("approve")}</button>
-              <button class="btn btn--danger btn--sm" data-delete-entry>${t("deleteEntry")}</button>
-            </div>
-          </div>
-        </div>`
+async function fetchPendingCounts(machines) {
+  return Promise.all(
+    machines.map((m) =>
+      Api.pendingEntries(m).then((r) => (r.pending_entries || []).length).catch(() => 0)
+    )
+  );
+}
+
+function renderKnowledgeMachineOptions(counts) {
+  const total = counts.reduce((s, c) => s + c, 0);
+  const prevValue = knowledgeMachineSelect.value;
+  knowledgeMachineSelect.innerHTML = [
+    `<option value="${ALL_MACHINES_VALUE}">All machines${total ? ` (${total})` : ""}</option>`,
+    ...knowledgeMachinesCache.map(
+      (m, i) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}${counts[i] ? ` (${counts[i]})` : ""}</option>`
+    ),
+  ].join("");
+  if ([...knowledgeMachineSelect.options].some((o) => o.value === prevValue)) {
+    knowledgeMachineSelect.value = prevValue;
+  }
+}
+
+async function loadKnowledgeMachines() {
+  try {
+    const res = await Api.allMachines();
+    knowledgeMachinesCache = res.machine_ids || [];
+    if (!knowledgeMachinesCache.length) {
+      knowledgeMachineSelect.innerHTML = "";
+      knowledgeList.innerHTML = emptyState(t("knowledgeEmpty"), iconDoc());
+      countKnowledge.textContent = "0";
+      return;
+    }
+    const counts = await fetchPendingCounts(knowledgeMachinesCache);
+    renderKnowledgeMachineOptions(counts);
+    countKnowledge.textContent = counts.reduce((s, c) => s + c, 0);
+    knowledgeMachineSelect.value = ALL_MACHINES_VALUE;
+    loadKnowledgeEntries(ALL_MACHINES_VALUE);
+  } catch (err) {
+    showToast(err.message || t("toastErrorGeneric"), "error");
+  }
+}
+knowledgeMachineSelect.addEventListener("change", () => loadKnowledgeEntries(knowledgeMachineSelect.value));
+
+async function loadKnowledgeEntries(machine_id) {
+  if (!machine_id) return;
+  knowledgeList.innerHTML = skeletonRows(2);
+  try {
+    let entries;
+    if (machine_id === ALL_MACHINES_VALUE) {
+      const perMachine = await Promise.all(
+        knowledgeMachinesCache.map((m) =>
+          Api.pendingEntries(m)
+            .then((r) => (r.pending_entries || []).map((en) => ({ ...en, machine_id: m })))
+            .catch(() => [])
         )
-        .join("");
-
-      knowledgeList.querySelectorAll("[data-approve-entry]").forEach((btn) =>
-        btn.addEventListener("click", async (e) => {
-          const id = e.currentTarget.closest(".entry-card").dataset.entryId;
-          const ok = await confirmModal({
-            title: t("confirmApproveEntryTitle"),
-            body: t("confirmApproveEntryBody"),
-            confirmLabel: t("approve"),
-          });
-          if (!ok) return;
-          try {
-            await Api.approveEntry(id);
-            showToast(t("toastEntryApproved"), "success");
-            loadKnowledgeEntries(machine_id);
-          } catch (err) {
-            showToast(err.message || t("toastErrorGeneric"), "error");
-          }
-        })
       );
-      knowledgeList.querySelectorAll("[data-delete-entry]").forEach((btn) =>
-        btn.addEventListener("click", async (e) => {
-          const id = e.currentTarget.closest(".entry-card").dataset.entryId;
-          const ok = await confirmModal({
-            title: t("confirmDeleteEntryTitle"),
-            body: t("confirmDeleteEntryBody"),
-            confirmLabel: t("deleteEntry"),
-            danger: true,
-          });
-          if (!ok) return;
-          try {
-            await Api.deleteEntry(id);
-            showToast(t("toastEntryDeleted"), "success");
-            loadKnowledgeEntries(machine_id);
-          } catch (err) {
-            showToast(err.message || t("toastErrorGeneric"), "error");
-          }
-        })
-      );
-    } catch (err) {
-      knowledgeList.innerHTML = "";
-      showToast(err.message || t("toastErrorGeneric"), "error");
+      entries = perMachine.flat();
+    } else {
+      const res = await Api.pendingEntries(machine_id);
+      entries = (res.pending_entries || []).map((en) => ({ ...en, machine_id }));
     }
+
+    if (!entries.length) {
+      knowledgeList.innerHTML = emptyState(t("knowledgeEmpty"), iconDoc());
+      return;
+    }
+
+    knowledgeList.innerHTML = entries
+      .map(
+        (en) => `
+      <div class="card entry-card" data-entry-id="${escapeHtml(en.id)}">
+        ${machine_id === ALL_MACHINES_VALUE ? `<span class="badge">${escapeHtml(en.machine_id)}</span>` : ""}
+        <p class="entry-text">${escapeHtml(en.text)}</p>
+        <div class="entry-meta">
+          <button class="btn btn--ghost btn--sm" data-speak-entry title="Listen">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4"/></svg>
+          </button>
+          <span class="sub">${t("submittedBy", { name: en.worker_name || en.worker_id || "—" })}</span>
+          <div class="entry-actions">
+            <button class="btn btn--success btn--sm" data-approve-entry>${t("approve")}</button>
+            <button class="btn btn--danger btn--sm" data-delete-entry>${t("deleteEntry")}</button>
+          </div>
+        </div>
+      </div>`
+      )
+      .join("");
+
+    knowledgeList.querySelectorAll("[data-speak-entry]").forEach((btn) =>
+      btn.addEventListener("click", (e) => {
+        const text = e.currentTarget.closest(".entry-card").querySelector(".entry-text").textContent;
+        speakText(text, e.currentTarget);
+      })
+    );
+    knowledgeList.querySelectorAll("[data-approve-entry]").forEach((btn) =>
+      btn.addEventListener("click", async (e) => {
+        const id = e.currentTarget.closest(".entry-card").dataset.entryId;
+        const ok = await confirmModal({ title: t("confirmApproveEntryTitle"), body: t("confirmApproveEntryBody"), confirmLabel: t("approve") });
+        if (!ok) return;
+        try {
+          await Api.approveEntry(id);
+          showToast(t("toastEntryApproved"), "success");
+          await refreshAfterEntryChange(machine_id);
+        } catch (err) {
+          showToast(err.message || t("toastErrorGeneric"), "error");
+        }
+      })
+    );
+    knowledgeList.querySelectorAll("[data-delete-entry]").forEach((btn) =>
+      btn.addEventListener("click", async (e) => {
+        const id = e.currentTarget.closest(".entry-card").dataset.entryId;
+        const ok = await confirmModal({ title: t("confirmDeleteEntryTitle"), body: t("confirmDeleteEntryBody"), confirmLabel: t("deleteEntry"), danger: true });
+        if (!ok) return;
+        try {
+          await Api.deleteEntry(id);
+          showToast(t("toastEntryDeleted"), "success");
+          await refreshAfterEntryChange(machine_id);
+        } catch (err) {
+          showToast(err.message || t("toastErrorGeneric"), "error");
+        }
+      })
+    );
+  } catch (err) {
+    knowledgeList.innerHTML = "";
+    showToast(err.message || t("toastErrorGeneric"), "error");
   }
+}
+
+async function refreshAfterEntryChange(currentSelection) {
+  const counts = await fetchPendingCounts(knowledgeMachinesCache);
+  renderKnowledgeMachineOptions(counts);
+  countKnowledge.textContent = counts.reduce((s, c) => s + c, 0);
+  loadKnowledgeEntries(currentSelection);
+}
 
   /* ================= MANUALS ================= */
   const manualsMachineSelect = document.getElementById("manuals-machine-select");

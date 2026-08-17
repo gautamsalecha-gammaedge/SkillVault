@@ -16,7 +16,8 @@
     --surface-2: #222834;
     --border: #2e3646;
     --text-main: #f1f5f9;
-    --text-muted: #94a3b8;
+    --text-mutedThis matches your uploaded `worker.html`, with only the requested changes applied.
+: #94a3b8;
     --primary-amber: #f59e0b;
     --danger-red: #ef4444;
     --success-green: #10b981;
@@ -220,18 +221,30 @@
     width: 100%;
   }
 
-  .tip-step { display: none; flex-direction: column; gap: 12px; }
-  .tip-step.is-active { display: flex; }
+  .tip-step {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .tip-step.is-active {
+    display: flex;
+  }
 </style>
 </head>
+
 <body>
 
 <div class="app-shell">
+
   <!-- Topbar -->
   <header class="topbar">
     <div class="topbar-brand">
       <div class="mark">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6l-8-4z" stroke="#17130a" stroke-width="2.5"/><path d="M9 12l2 2 4-4" stroke="#17130a" stroke-width="2.5"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6l-8-4z" stroke="#17130a" stroke-width="2.5"/>
+          <path d="M9 12l2 2 4-4" stroke="#17130a" stroke-width="2.5"/>
+        </svg>
       </div>
       <strong data-i18n="appName">SkillVault</strong>
     </div>
@@ -239,7 +252,11 @@
     <div style="display:flex; align-items:center; gap:12px;">
       <span id="greeting" style="font-size:0.85rem; color:var(--text-muted);"></span>
       <button class="icon-btn" id="btn-logout" title="Log out" style="background:transparent; border:none; color:var(--text-muted); cursor:pointer;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+          <path d="M16 17l5-5-5-5"/>
+          <path d="M21 12H9"/>
+        </svg>
       </button>
     </div>
   </header>
@@ -251,14 +268,20 @@
   </div>
 
   <div class="workspace" id="workspace" style="display:none; flex:1; display:flex; flex-direction:column; gap:16px;">
+
     <!-- Mode Tabs -->
     <div class="mode-tabs" role="tablist">
       <button class="mode-tab" role="tab" aria-selected="true" id="mode-tab-ask">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+        </svg>
         <span data-i18n="tabAsk">Ask Question</span>
       </button>
+
       <button class="mode-tab" role="tab" aria-selected="false" id="mode-tab-tip">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a6 6 0 00-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0012 2z"/></svg>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 18h6M10 22h4M12 2a6 6 0 00-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0012 2z"/>
+        </svg>
         <span data-i18n="tabShareTip">Share Tip</span>
       </button>
     </div>
@@ -267,8 +290,12 @@
     <section class="mode-panel is-active" id="panel-ask">
       <div id="chat-scroll" style="flex:1; min-height:220px;">
         <div id="ask-empty" style="text-align:center; padding:40px 16px;">
-          <h4 id="ask-empty-title" style="margin:0 0 8px 0;" data-i18n="askEmptyTitle">Ask anything about this machine</h4>
-          <p style="color:var(--text-muted); font-size:0.85rem; margin:0;" data-i18n="askEmptyBody">Type or speak your question directly.</p>
+          <h4 id="ask-empty-title" style="margin:0 0 8px 0;" data-i18n="askEmptyTitle">
+            Ask anything about this machine
+          </h4>
+          <p style="color:var(--text-muted); font-size:0.85rem; margin:0;" data-i18n="askEmptyBody">
+            Type or speak your question directly.
+          </p>
           <div id="example-chips" style="margin-top:16px; display:flex; gap:8px; justify-center; flex-wrap:wrap;"></div>
         </div>
       </div>
@@ -277,14 +304,18 @@
       <form id="ask-form" style="margin-top:auto;">
         <div class="input-bar-wrapper">
           <input type="text" class="smart-input" id="ask-input" placeholder="Ask a question or tap mic..." required />
+
           <button type="button" class="mic-inline-btn" id="ask-mic-btn" title="Speak question">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
               <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4"/>
             </svg>
           </button>
+
           <button type="submit" class="send-inline-btn" id="ask-send-btn" title="Send">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
           </button>
         </div>
       </form>
@@ -293,12 +324,16 @@
     <!-- TIP PANEL -->
     <section class="mode-panel" id="panel-tip">
       <div class="tip-card">
+
         <!-- Step 1: Input -->
         <div class="tip-step is-active" id="tip-step-write">
-          <p style="color:var(--text-muted); font-size:0.85rem; margin:0 0 8px 0;" data-i18n="tipIntro">Share a fix or shortcut for this machine.</p>
-          
+          <p style="color:var(--text-muted); font-size:0.85rem; margin:0 0 8px 0;" data-i18n="tipIntro">
+            Share a fix or shortcut for this machine.
+          </p>
+
           <div class="input-bar-wrapper">
             <input type="text" class="smart-input" id="tip-text" placeholder="Type or speak your tip..." />
+
             <button type="button" class="mic-inline-btn" id="tip-mic-btn" title="Speak tip">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
@@ -315,106 +350,70 @@
         <!-- Step 2: Clarify -->
         <div class="tip-step" id="tip-step-clarify">
           <div style="font-weight:600;" data-i18n="tipClarifyingTitle">Clarification Needed</div>
-          <p id="clarify-question" style="font-size:0.9rem; color:var(--primary-amber); margin:0;"></p>
-          <div class="input-bar-wrapper">
-            <input type="text" class="smart-input" id="clarify-answer" placeholder="Answer or speak clarification..." />
-            <button type="button" class="mic-inline-btn" id="clarify-mic-btn" title="Speak answer">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4"/></svg>
+
+          <div style="display:flex; align-items:center; gap:8px;">
+            <p id="clarify-question" style="font-size:0.9rem; color:var(--primary-amber); margin:0; flex:1;"></p>
+
+            <button type="button" class="btn btn--ghost" id="clarify-speak-btn" title="Listen">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+                <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4"/>
+              </svg>
             </button>
           </div>
+
+          <div class="input-bar-wrapper">
+            <input type="text" class="smart-input" id="clarify-answer" placeholder="Answer or speak clarification..." />
+
+            <button type="button" class="mic-inline-btn" id="clarify-mic-btn" title="Speak answer">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+                <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4"/>
+              </svg>
+            </button>
+          </div>
+
           <button class="action-btn" id="clarify-continue-btn">Continue</button>
         </div>
 
         <!-- Step 3: Polish -->
         <div class="tip-step" id="tip-step-polish">
-          <label style="font-size:0.85rem;" data-i18n="tipPolishedLabel">Review Polished Tip</label>
+          <label style="font-size:0.85rem;" data-i18n="tipPolishedLabel">
+            Review Polished Tip
+          </label>
+
           <textarea class="smart-input" id="polished-text" rows="4" style="border:1px solid var(--border); border-radius:12px; padding:12px;"></textarea>
+
           <button class="action-btn" id="tip-save-btn">Save Tip</button>
         </div>
 
         <!-- Step 4: Success -->
         <div class="tip-step" id="tip-step-success" style="text-align:center;">
           <h4 data-i18n="tipSuccessTitle">Tip Saved</h4>
-          <p style="color:var(--text-muted); font-size:0.85rem;" data-i18n="tipSuccessBody">Sent for approval.</p>
+          <p style="color:var(--text-muted); font-size:0.85rem;" data-i18n="tipSuccessBody">
+            Sent for approval.
+          </p>
           <button class="action-btn" id="tip-another-btn">Share Another Tip</button>
         </div>
+
       </div>
     </section>
+
   </div>
 
   <div class="empty-shell" id="no-machines" style="display:none; text-align:center; padding:40px;">
     <h4 data-i18n="noMachinesTitle">No machines assigned</h4>
   </div>
+
 </div>
 
 <audio id="tts-audio" style="display:none;"></audio>
-
-<!-- Automatic Speech-to-Text Script -->
-<script>
-  document.addEventListener('DOMContentLoaded', () => {
-    // Setup Speech Recognition
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      console.warn('Web Speech API is not supported in this browser.');
-      return;
-    }
-
-    function setupAutoVoice(micBtnId, inputId) {
-      const micBtn = document.getElementById(micBtnId);
-      const inputEl = document.getElementById(inputId);
-      if (!micBtn || !inputEl) return;
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      let isListening = false;
-
-      micBtn.addEventListener('click', () => {
-        if (!isListening) {
-          recognition.start();
-        } else {
-          recognition.stop();
-        }
-      });
-
-      recognition.onstart = () => {
-        isListening = true;
-        micBtn.classList.add('listening');
-      };
-
-      recognition.onresult = (event) => {
-        let transcript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          transcript += event.results[i][0].transcript;
-        }
-        inputEl.value = transcript;
-      };
-
-      recognition.onerror = () => {
-        isListening = false;
-        micBtn.classList.remove('listening');
-      };
-
-      recognition.onend = () => {
-        isListening = false;
-        micBtn.classList.remove('listening');
-      };
-    }
-
-    // Attach speech recognition directly to input fields
-    setupAutoVoice('ask-mic-btn', 'ask-input');
-    setupAutoVoice('tip-mic-btn', 'tip-text');
-    setupAutoVoice('clarify-mic-btn', 'clarify-answer');
-  });
-</script>
 
 <script src="js/i18n.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/toast.js"></script>
 <script src="js/api.js"></script>
 <script src="js/worker.js"></script>
+
 </body>
 </html>
