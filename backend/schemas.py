@@ -6,6 +6,7 @@ Kept in one file since they're small and every router needs a subset of them.
 """
 
 from pydantic import BaseModel
+from typing import Optional
 
 
 class AskRequest(BaseModel):
@@ -59,3 +60,13 @@ class AssignMachineRequest(BaseModel):
 
 class EditEntryRequest(BaseModel):
     text: str
+
+
+class CreateTicketRequest(BaseModel):
+    title: str
+    description: str
+    machine_id: Optional[str] = None
+    priority: str = "Medium"  # Low / Medium / High
+
+class UpdateTicketRequest(BaseModel):
+    status: str  # Open / In Progress / Resolved / Closed

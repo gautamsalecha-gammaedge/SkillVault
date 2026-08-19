@@ -26,7 +26,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from routers import ask, knowledge, worker, admin, voice
+from routers import ask, knowledge, worker, admin, voice, tickets
 
 # Rate limiter based on client IP
 limiter = Limiter(key_func=get_remote_address)
@@ -52,6 +52,7 @@ app.include_router(knowledge.router)
 app.include_router(worker.router)
 app.include_router(admin.router)
 app.include_router(voice.router)
+app.include_router(tickets.router)
 
 
 @app.get("/")

@@ -238,4 +238,33 @@ export const Api = {
      No language is ever passed in here - that's the whole point,
      Sarvam figures it out from the audio itself. */
   transcribe: (audioBlob) => transcribeXhr(audioBlob),
+
+    speak: (text, language_code) => apiFetchBinary('/speak', { body: { text, language_code } }),
+
+  /* Records audio -> Sarvam STT transcribes it AND auto-detects the
+     spoken language in one call. Returns { transcript, language_code }.
+     No language is ever passed in here - that's the whole point,
+     Sarvam figures it out from the audio itself. */
+  transcribe: (audioBlob) => transcribeXhr(audioBlob),
+
+  /* ---------------- Tickets ---------------- */
+  createTicket: (data) =>
+    apiFetch('/tickets', { method: 'POST', auth: 'worker', body: data }),
+
+  myTickets: () =>
+    apiFetch('/tickets/my', { auth: 'worker' }),
+
+  adminTickets: (status = null) =>
+    apiFetch(
+      status ? `/tickets/admin?status=${encodeURIComponent(status)}` : '/tickets/admin',
+      { auth: 'admin' }
+    ),
+
+  updateTicketStatus: (ticketId, status) =>
+    apiFetch(`/tickets/${encodeURIComponent(ticketId)}`, {
+      method: 'PATCH',
+      auth: 'admin',
+      body: { status },
+    }),
+
 };

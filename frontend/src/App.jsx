@@ -17,7 +17,9 @@ import WorkersMachines from './pages/admin/WorkersMachines';
 import KnowledgeReview from './pages/admin/KnowledgeReview';
 import Analytics from './pages/admin/Analytics';
 import Manuals from './pages/admin/Manuals';
-
+import RaiseTicket from './pages/worker/RaiseTicket';
+import MyTickets from './pages/worker/MyTickets';
+import Tickets from './pages/admin/Tickets';
 export default function App() {
   return (
     <Routes>
@@ -34,6 +36,9 @@ export default function App() {
         <Route path="hands-free" element={<HandsFree />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="raise-ticket" element={<RaiseTicket />} />
+        <Route path="my-tickets" element={<MyTickets />} />
+        
       </Route>
 
       <Route
@@ -46,6 +51,7 @@ export default function App() {
         <Route path="knowledge-review" element={<KnowledgeReview />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="manuals" element={<Manuals />} />
+        <Route path="tickets" element={<Tickets />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

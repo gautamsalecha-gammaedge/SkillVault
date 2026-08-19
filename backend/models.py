@@ -5,7 +5,8 @@ Defines the actual tables that will exist in your Postgres database.
 Each class here becomes one real table once we run the setup step.
 """
 
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Text
+from datetime import datetime
 from db import Base
 
 
@@ -16,8 +17,7 @@ class Worker(Base):
     worker_id = Column(String, primary_key=True)
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=False)
-    # New: worker cannot log in until an admin approves their registration.
-    # Defaults to False, so every new registration starts out unapproved.
+    # Worker cannot log in until an admin approves their registration.
     is_approved = Column(Boolean, nullable=False, default=False)
 
 
@@ -35,19 +35,34 @@ class WorkerSession(Base):
 
 
 class AdminSession(Base):
-    """One row per active admin login. Same idea as WorkerSession, but for the single admin account."""
+    """One row per active admin login."""
     __tablename__ = "admin_sessions"
 
     token = Column(String, primary_key=True)
     expires_at = Column(DateTime, nullable=False)
 
+
 class WorkerMachine(Base):
     """
     One row per (worker, machine) assignment - which machines a worker is
-    allowed to see and use. Composite primary key naturally prevents the
-    same machine being assigned twice to the same worker.
+    allowed to see and use.
     """
     __tablename__ = "worker_machines"
 
     worker_id = Column(String, ForeignKey("workers.worker_id"), primary_key=True)
     machine_id = Column(String, primary_key=True)
+
+
+class Ticket(Base):
+    """Worker-raised tickets / issues."""
+    __tablename__ = "tickets"
+
+    id = Column(String, primary_key=True)  # uuid
+    worker_id = Column(String, ForeignKey("workers.worker_id"), nullable=False)
+    machine_id = Column(String, nullable=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    priority = Column(String, nullable=False, default="Medium")  # Low / Medium / High
+    status = Column(String, nullable=False, default="Open")      # Open / In Progress / Resolved / Closed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -16,6 +16,7 @@ export default function AdminLayout() {
     { to: '/admin/pending-workers', label: t('admin') + ' - Pending workers' },
     { to: '/admin/workers-machines', label: 'Workers & machines' },
     { to: '/admin/knowledge-review', label: 'Knowledge review' },
+    { to: '/admin/tickets', label: 'Tickets' },          // ← add this
     { to: '/admin/analytics', label: 'Analytics' },
     { to: '/admin/manuals', label: 'Manuals' },
   ];
