@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, FileText, MessageCircle, Sparkles } from 'lucide-react';
+import { Mic, Send, FileText, MessageCircle, Sparkles } from 'lucide-react';
 import MachineSelect from '../../components/MachineSelect';
 import SpeakButton from '../../components/SpeakButton';
 import { Api } from '../../lib/api';
-import { useSpeechRecognition } from '../../lib/useSpeechRecognition';
-import { getLanguage } from '../../lib/languages';
+import { useVoiceRecorder } from '../../lib/useVoiceRecorder';
 import { useI18n } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import { useAskSession } from '../../lib/workerSession';
+
+// Fallback used only for typed questions (no audio to detect a language
+// from) or before the worker has spoken at all in this session.
+const DEFAULT_LANG = 'en-IN';
 
 export default function Ask() {
   const [machines, setMachines] = useState([]);
@@ -20,9 +23,12 @@ export default function Ask() {
   const scrollRef = useRef(null);
   const { push } = useToast();
   const { t } = useI18n();
-  // Audio language stays as-is for now (untouched, separate effort) —
-  // still sourced from getLanguage(), not from the app-language picker.
-  const { listening, supported, start } = useSpeechRecognition({ lang: getLanguage() });
+
+  // Sarvam-detected language from the worker's most recent recording.
+  // Carries forward as the default for typed follow-ups in the same
+  // session, since a worker rarely switches language mid-conversation.
+  const [detectedLang, setDetectedLang] = useState(DEFAULT_LANG);
+  const { recording, busy: transcribing, start, stop } = useVoiceRecorder();
 
   useEffect(() => {
     Api.myMachines()
@@ -38,15 +44,19 @@ export default function Ask() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  async function submitQuestion(text) {
+  // lang = the language this specific question was asked in, so the
+  // answer's SpeakButton plays back in that language even if a later
+  // question in the same session switches languages.
+  async function submitQuestion(text, lang) {
     const q = text.trim();
     if (!q || !machine) return;
-    setMessages((m) => [...m, { role: 'worker', text: q }]);
+    const askLang = lang || detectedLang;
+    setMessages((m) => [...m, { role: 'worker', text: q, lang: askLang }]);
     setQuestion('');
     setAsking(true);
     try {
       const res = await Api.ask(q, machine);
-      setMessages((m) => [...m, { role: 'answer', text: res.answer, sourcesUsed: res.sources_used }]);
+      setMessages((m) => [...m, { role: 'answer', text: res.answer, sourcesUsed: res.sources_used, lang: askLang }]);
     } catch (err) {
       push(err.message, 'error');
       setMessages((m) => m.slice(0, -1));
@@ -56,14 +66,16 @@ export default function Ask() {
   }
 
   function handleMic() {
-    if (!supported) {
-      push(t('micNotSupported'), 'info');
+    if (recording) {
+      stop();
       return;
     }
     start(
-      (transcript) => submitQuestion(transcript),
-      () => push(t('micError'), 'error'),
-      (transcript) => setQuestion(transcript),
+      ({ transcript, language_code }) => {
+        if (language_code) setDetectedLang(language_code);
+        submitQuestion(transcript, language_code);
+      },
+      (err) => push(err || t('micError'), 'error'),
     );
   }
 
@@ -167,7 +179,7 @@ export default function Ask() {
                         {t('drawnFrom')} {m.sourcesUsed} {m.sourcesUsed === 1 ? t('passageSingular') : t('passagePlural')} {t('inKnowledgeBase')}
                       </div>
                     ) : <span />}
-                    <SpeakButton text={m.text} />
+                    <SpeakButton text={m.text} lang={m.lang} />
                   </div>
                 </div>
               </div>
@@ -186,7 +198,7 @@ export default function Ask() {
                 background: 'var(--sv-bg)', border: '1px solid var(--sv-border)',
                 borderRadius: '4px 14px 14px 14px', padding: '12px 14px', color: 'var(--sv-muted)', fontSize: 13.5,
               }}>
-                {t('thinking')}
+                {transcribing ? (t('transcribing') || 'Transcribing…') : t('thinking')}
               </div>
             </div>
           )}
@@ -194,7 +206,7 @@ export default function Ask() {
 
         {/* Input bar */}
         <form
-          onSubmit={(e) => { e.preventDefault(); submitQuestion(question); }}
+          onSubmit={(e) => { e.preventDefault(); submitQuestion(question, detectedLang); }}
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: 12, borderTop: '1px solid var(--sv-border)', background: 'var(--sv-surface)',
@@ -214,17 +226,32 @@ export default function Ask() {
           <button
             type="button"
             onClick={handleMic}
-            disabled={!machine}
+            disabled={!machine || transcribing}
             style={{
               width: 40, height: 40, minWidth: 40, borderRadius: '50%', display: 'flex',
               alignItems: 'center', justifyContent: 'center', transition: 'background 0.15s, box-shadow 0.15s',
-              background: listening ? 'var(--sv-brass)' : 'transparent',
-              color: listening ? '#fff' : 'var(--sv-brass)',
-              boxShadow: listening ? 'none' : 'inset 0 0 0 1.5px var(--sv-brass-soft)',
+              background: recording ? 'var(--sv-brass)' : 'transparent',
+              color: recording ? '#fff' : 'var(--sv-brass)',
+              boxShadow: recording ? 'none' : 'inset 0 0 0 1.5px var(--sv-brass-soft)',
             }}
             aria-label={t('askByVoiceAria')}
           >
             <Mic size={16} />
+          </button>
+          <button
+            type="submit"
+            disabled={!machine || !question.trim() || asking}
+            aria-label={t('sendAria') || 'Send'}
+            style={{
+              width: 40, height: 40, minWidth: 40, borderRadius: '50%', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', border: 'none',
+              cursor: (!machine || !question.trim() || asking) ? 'not-allowed' : 'pointer',
+              background: (!machine || !question.trim() || asking) ? 'var(--sv-border)' : 'var(--sv-brass)',
+              color: '#fff',
+              transition: 'background 0.15s ease',
+            }}
+          >
+            <Send size={16} />
           </button>
         </form>
       </div>

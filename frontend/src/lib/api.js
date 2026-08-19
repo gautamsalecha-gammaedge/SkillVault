@@ -124,6 +124,36 @@ function uploadManualXhr(machine_id, file, onProgress) {
   });
 }
 
+/**
+ * Voice recording -> transcript needs multipart file upload, similar
+ * shape to uploadManualXhr but simpler (no progress tracking needed
+ * for a few seconds of audio, and no admin auth - worker auth instead).
+ */
+function transcribeXhr(audioBlob) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('file', audioBlob, 'audio.webm');
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/transcribe`);
+    const token = getWorkerToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data); // { transcript, language_code }
+      } else {
+        if (xhr.status === 401 || xhr.status === 403) clearWorkerSession();
+        reject(new ApiError(xhr.status, (data && data.detail) || 'Something went wrong. Please try again.'));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'Network error — check your connection and try again.'));
+    xhr.send(form);
+  });
+}
+
 export const Api = {
   /* ---------------- Worker ---------------- */
   workerRegister: (worker_id, password, name) =>
@@ -133,6 +163,9 @@ export const Api = {
     apiFetch('/worker/login', { method: 'POST', body: { worker_id, password } }),
 
   myMachines: () => apiFetch('/worker/my-machines', { auth: 'worker' }),
+  
+  myTips: () => apiFetch('/worker/my-tips', { auth: 'worker' }),
+
 
   /* ---------------- Admin ---------------- */
   adminLogin: (username, password) =>
@@ -162,6 +195,8 @@ export const Api = {
     apiFetch(`/admin/approve/${encodeURIComponent(entry_id)}`, { method: 'POST', auth: 'admin' }),
   deleteEntry: (entry_id) =>
     apiFetch(`/admin/delete/${encodeURIComponent(entry_id)}`, { method: 'DELETE', auth: 'admin' }),
+  editEntry: (entry_id, text) =>
+    apiFetch(`/admin/edit/${encodeURIComponent(entry_id)}`, { method: 'PUT', auth: 'admin', body: { text } }),
 
   uploadManual: (machine_id, file, onProgress) => uploadManualXhr(machine_id, file, onProgress),
   manuals: (machine_id) =>
@@ -177,15 +212,30 @@ export const Api = {
      sources_used is a count, NOT structured source data. The
      confidence bar / source-attribution chips seen in the design
      preview have no backend field to bind to yet — treat as UI
-     that's ready for a contract that doesn't exist server-side yet. */
+     that's ready for a contract that doesn't exist server-side yet.
+
+     language_code on checkKnowledge/addKnowledge/speak comes from
+     Sarvam STT's auto-detected language (see transcribe below), not
+     from any stored app setting — each call carries whatever was just
+     detected from the worker's own voice. */
   ask: (question, machine_id) =>
     apiFetch('/ask', { method: 'POST', auth: 'worker', body: { question, machine_id } }),
 
-  checkKnowledge: (text, machine_id, round) =>
-    apiFetch('/Knowledge/add-knowledge/check', { method: 'POST', auth: 'worker', body: { text, machine_id, round } }),
+  checkKnowledge: (text, machine_id, round, language_code) =>
+    apiFetch('/Knowledge/add-knowledge/check', {
+      method: 'POST',
+      auth: 'worker',
+      body: { text, machine_id, round, language_code },
+    }),
 
   addKnowledge: (text, machine_id, language_code) =>
     apiFetch('/Knowledge/add-knowledge', { method: 'POST', auth: 'worker', body: { text, machine_id, language_code } }),
 
   speak: (text, language_code) => apiFetchBinary('/speak', { body: { text, language_code } }),
+
+  /* Records audio -> Sarvam STT transcribes it AND auto-detects the
+     spoken language in one call. Returns { transcript, language_code }.
+     No language is ever passed in here - that's the whole point,
+     Sarvam figures it out from the audio itself. */
+  transcribe: (audioBlob) => transcribeXhr(audioBlob),
 };

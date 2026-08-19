@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, Pencil, Info } from 'lucide-react';
+import { Search, Pencil, Info, Check, X } from 'lucide-react';
 import Stamp from '../../components/Stamp';
 import { Api } from '../../lib/api';
 import { useToast } from '../../lib/toast';
@@ -12,6 +12,7 @@ export default function KnowledgeReview() {
   const [editingId, setEditingId] = useState(null);
   const [draftText, setDraftText] = useState('');
   const [busyId, setBusyId] = useState(null);
+  const [savingId, setSavingId] = useState(null);
   const { push } = useToast();
 
   useEffect(() => {
@@ -57,6 +58,36 @@ export default function KnowledgeReview() {
     }
   }
 
+  function startEdit(entry) {
+    setEditingId(entry.id);
+    setDraftText(entry.text);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setDraftText('');
+  }
+
+  async function saveEdit(id) {
+    const trimmed = draftText.trim();
+    if (!trimmed) {
+      push('Tip text cannot be empty.', 'error');
+      return;
+    }
+    setSavingId(id);
+    try {
+      await Api.editEntry(id, trimmed);
+      push('Entry updated.', 'success');
+      setEntries((e) => e.map((x) => (x.id === id ? { ...x, text: trimmed } : x)));
+      setEditingId(null);
+      setDraftText('');
+    } catch (err) {
+      push(err.message, 'error');
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   const filtered = (entries || []).filter((e) => {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
@@ -89,14 +120,14 @@ export default function KnowledgeReview() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, color: 'var(--sv-muted)', marginBottom: 16, padding: 10, background: 'var(--sv-brass-soft)', borderRadius: 'var(--sv-radius-sm)' }}>
+      {/* <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, color: 'var(--sv-muted)', marginBottom: 16, padding: 10, background: 'var(--sv-brass-soft)', borderRadius: 'var(--sv-radius-sm)' }}>
         <Info size={13} style={{ flexShrink: 0, marginTop: 1, color: 'var(--sv-brass)' }} />
         <span>
           This only shows <strong>pending</strong> entries per machine — the backend doesn't yet support
-          cross-status search or filters (worker, date, source type). Editing text here previews a
-          change but doesn't save it — there's no endpoint to persist an edit yet, only approve or delete as-is.
+          cross-status search or filters (worker, date, source type).
         </span>
-      </div>
+      </div> */}
+      
 
       {entries === null && <p style={{ fontSize: 13, color: 'var(--sv-muted)' }}>Loading…</p>}
       {entries?.length === 0 && (
@@ -108,6 +139,7 @@ export default function KnowledgeReview() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {filtered.map((entry) => {
           const editing = editingId === entry.id;
+          const saving = savingId === entry.id;
           return (
             <div key={entry.id} className="sv-card">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -120,6 +152,8 @@ export default function KnowledgeReview() {
               {editing ? (
                 <textarea
                   rows={3}
+                  autoFocus
+                  disabled={saving}
                   style={{ width: '100%', border: '1px solid var(--sv-brass)', borderRadius: 'var(--sv-radius-sm)', padding: 10, fontSize: 14, outline: 'none', marginBottom: 12, resize: 'vertical' }}
                   value={draftText}
                   onChange={(e) => setDraftText(e.target.value)}
@@ -131,21 +165,28 @@ export default function KnowledgeReview() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 12, color: 'var(--sv-muted)' }}>Submitted by {entry.worker_name || entry.worker_id}</span>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    className="sv-btn sv-btn--outline"
-                    onClick={() => {
-                      if (editing) { setEditingId(null); }
-                      else { setEditingId(entry.id); setDraftText(entry.text); }
-                    }}
-                  >
-                    <Pencil size={13} /> {editing ? 'Done editing' : 'Edit'}
-                  </button>
-                  <button className="sv-btn sv-btn--teal" disabled={busyId === entry.id} onClick={() => approve(entry.id)}>
-                    Approve
-                  </button>
-                  <button className="sv-btn sv-btn--danger-text" disabled={busyId === entry.id} onClick={() => remove(entry.id)}>
-                    Delete
-                  </button>
+                  {editing ? (
+                    <>
+                      <button className="sv-btn sv-btn--outline" disabled={saving} onClick={cancelEdit}>
+                        <X size={13} /> Cancel
+                      </button>
+                      <button className="sv-btn sv-btn--teal" disabled={saving} onClick={() => saveEdit(entry.id)}>
+                        <Check size={13} /> {saving ? 'Saving…' : 'Save'}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="sv-btn sv-btn--outline" onClick={() => startEdit(entry)}>
+                        <Pencil size={13} /> Edit
+                      </button>
+                      <button className="sv-btn sv-btn--teal" disabled={busyId === entry.id} onClick={() => approve(entry.id)}>
+                        Approve
+                      </button>
+                      <button className="sv-btn sv-btn--danger-text" disabled={busyId === entry.id} onClick={() => remove(entry.id)}>
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

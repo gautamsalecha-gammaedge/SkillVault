@@ -3,6 +3,15 @@ routers/knowledge.py
 
 POST /add-knowledge - logged-in worker submits a new tip/fix for a
 machine. Saved to Chroma with status "pending" until an admin approves it.
+
+Language: language_code on both request schemas comes from Sarvam STT's
+auto-detection (voice/stt.py) at the point the worker spoke their tip -
+not from a stored app setting. It flows straight through: detected on
+recording -> sent with /add-knowledge/check -> used to phrase the
+clarifying question in the same language -> sent again with
+/add-knowledge -> used for the spoken confirmation message. If the
+worker typed instead of spoke, the frontend falls back to a default
+(see schemas.py) since there's no audio to detect a language from.
 """
 
 from fastapi import APIRouter, Depends
@@ -27,8 +36,12 @@ def check_knowledge(req: CheckKnowledgeRequest, worker: dict = Depends(require_w
     Capped at 2 rounds: if req.round >= 2, this forces completion regardless
     of what the model thinks, so the worker is never asked more than one
     clarifying question per submission.
+
+    req.language_code is forwarded into review_knowledge so any clarifying
+    question comes back written in the same language the worker actually
+    spoke/typed in, not guessed by the model from the text.
     """
-    result = review_knowledge(req.text, req.machine_id)
+    result = review_knowledge(req.text, req.machine_id, req.language_code)
 
     if req.round >= 2:
         result["complete"] = True

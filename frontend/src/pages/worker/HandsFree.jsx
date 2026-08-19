@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Mic, Waves } from 'lucide-react';
 import MachineSelect from '../../components/MachineSelect';
 import { Api } from '../../lib/api';
-import { useSpeechRecognition } from '../../lib/useSpeechRecognition';
-import { getLanguage } from '../../lib/languages';
+import { useVoiceRecorder } from '../../lib/useVoiceRecorder';
 import { useToast } from '../../lib/toast';
 import { useHandsFreeSession } from '../../lib/workerSession';
 import { useI18n } from '../../lib/i18n';
@@ -20,26 +19,37 @@ function savePrefs(p) {
   localStorage.setItem(KEY, JSON.stringify(p));
 }
 
-const STATE = { IDLE: 'idle', LISTENING: 'listening', THINKING: 'thinking', SPEAKING: 'speaking' };
+const STATE = { IDLE: 'idle', LISTENING: 'listening', TRANSCRIBING: 'transcribing', THINKING: 'thinking', SPEAKING: 'speaking' };
+
+// Fallback for the very first question in a session, before Sarvam has
+// detected anything yet. After that, detectedLang tracks whatever the
+// worker most recently spoke - carried across turns since a worker
+// rarely switches language mid hands-free session.
+const DEFAULT_LANG = 'en-IN';
 
 /**
  * Real "wake word" detection (always-on keyword spotting for something
  * like "Hey Vault") needs a dedicated model running continuously in the
- * background — not something the browser's SpeechRecognition API does
- * on its own. What's implemented here instead, honestly: tap the mic to
- * ask a question, get it answered and (optionally) read aloud, and if
- * "Continuous listening" is on, the mic re-arms itself after the answer
- * so you can keep going without tapping again. "Wake word" vs
- * "Push-to-talk" changes whether it re-arms automatically or waits for
- * your next tap.
+ * background — not something achievable with a record-then-send STT
+ * flow. What's implemented here, honestly: tap the mic to start
+ * recording, tap again to stop and send it off, get it answered and
+ * (optionally) read aloud, and if "Continuous listening" is on, the mic
+ * re-arms itself after the answer so you don't have to navigate back or
+ * tap "start" again. "Wake word" vs "Push-to-talk" changes whether it
+ * re-arms automatically or waits for your next tap to even begin -
+ * neither mode removes the need to tap once to signal "I'm done
+ * talking," since that's what tells the recorder to stop and send the
+ * audio. True silence-triggered hands-free (no second tap at all) needs
+ * a live-streaming connection with server-side voice activity detection,
+ * which isn't what's wired up here.
  *
- * The live mic/audio session (SpeechRecognition instance, Audio element)
- * can't survive navigating to another tab — the browser tears that down
- * with the component, same as any other page. But the *result* of a
- * question asked here — busy flag, last question, last answer — lives in
- * WorkerSessionProvider (above <Outlet/>), so if you switch to Ask or
- * Settings while it's thinking, the answer still lands and is there
- * when you come back, instead of vanishing.
+ * The live mic/audio session (recorder, WebSocket-free here, Audio
+ * element) can't survive navigating to another tab — the browser tears
+ * that down with the component, same as any other page. But the
+ * *result* of a question asked here — busy flag, last question, last
+ * answer — lives in WorkerSessionProvider (above <Outlet/>), so if you
+ * switch to Ask or Settings while it's thinking, the answer still lands
+ * and is there when you come back, instead of vanishing.
  */
 export default function HandsFree() {
   const { t } = useI18n();
@@ -55,9 +65,12 @@ export default function HandsFree() {
   // persist across unmount. Initialized from the shared `busy` flag so
   // a request still in flight shows "Thinking…" again on return.
   const [state, setState] = useState(busy ? STATE.THINKING : STATE.IDLE);
+  // Sarvam-detected language from the worker's most recent recording -
+  // replaces the old getLanguage() stored-setting lookup.
+  const [detectedLang, setDetectedLang] = useState(DEFAULT_LANG);
   const audioRef = useRef(null);
   const { push } = useToast();
-  const { supported, start, stop } = useSpeechRecognition({ lang: getLanguage() });
+  const { recording, start, stop } = useVoiceRecorder();
 
   useEffect(() => {
     Api.myMachines()
@@ -78,32 +91,40 @@ export default function HandsFree() {
   }
 
   function beginListening() {
-    if (!supported) {
-      push(t('micNotSupportedHandsFree'), 'info');
-      return;
-    }
     if (!machine) {
       push(t('noMachineAssignedYet'), 'info');
       return;
     }
     setState(STATE.LISTENING);
     start(
-      (transcript) => handleQuestion(transcript),
-      () => { setState(STATE.IDLE); push(t('micErrorHandsFree'), 'error'); },
+      ({ transcript, language_code }) => {
+        if (language_code) setDetectedLang(language_code);
+        setState(STATE.THINKING);
+        handleQuestion(transcript, language_code || detectedLang);
+      },
+      (err) => { setState(STATE.IDLE); push(err || t('micErrorHandsFree'), 'error'); },
     );
   }
 
-  async function handleQuestion(transcript) {
+  function stopListening() {
+    // Recording actually stopping is async (MediaRecorder.onstop ->
+    // upload -> transcribe), so this just signals "I'm done talking" -
+    // the TRANSCRIBING state and the eventual THINKING/error transition
+    // happen inside beginListening()'s start() callbacks above.
+    setState(STATE.TRANSCRIBING);
+    stop();
+  }
+
+  async function handleQuestion(transcript, lang) {
     setLastQuestion(transcript);
     setLastAnswer('');
-    setState(STATE.THINKING);
     setBusy(true);
     try {
       const res = await Api.ask(transcript, machine);
       setLastAnswer(res.answer);
       setBusy(false);
       if (prefs.spoken) {
-        await speak(res.answer);
+        await speak(res.answer, lang);
       } else if (prefs.continuous && prefs.activation === 'wake') {
         beginListening();
       } else {
@@ -116,10 +137,10 @@ export default function HandsFree() {
     }
   }
 
-  async function speak(text) {
+  async function speak(text, lang) {
     setState(STATE.SPEAKING);
     try {
-      const { blob } = await Api.speak(text, getLanguage());
+      const { blob } = await Api.speak(text, lang || detectedLang);
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
@@ -141,8 +162,7 @@ export default function HandsFree() {
 
   function handleMicTap() {
     if (state === STATE.LISTENING) {
-      stop();
-      setState(STATE.IDLE);
+      stopListening();
       return;
     }
     if (state === STATE.SPEAKING) {
@@ -150,13 +170,14 @@ export default function HandsFree() {
       setState(STATE.IDLE);
       return;
     }
-    if (state === STATE.THINKING) return;
+    if (state === STATE.THINKING || state === STATE.TRANSCRIBING) return;
     beginListening();
   }
 
   const statusLabel = {
     [STATE.IDLE]: prefs.activation === 'wake' ? t('statusIdleWake') : t('statusIdlePtt'),
     [STATE.LISTENING]: t('statusListening'),
+    [STATE.TRANSCRIBING]: t('transcribing') || t('thinking'),
     [STATE.THINKING]: t('thinking'),
     [STATE.SPEAKING]: t('statusSpeaking'),
   }[state];
@@ -182,7 +203,7 @@ export default function HandsFree() {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 24 }}>
           <button
             onClick={handleMicTap}
-            disabled={state === STATE.THINKING || !machine}
+            disabled={state === STATE.THINKING || state === STATE.TRANSCRIBING || !machine}
             style={{
               width: 96, height: 96, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'var(--sv-brass)',
@@ -197,6 +218,11 @@ export default function HandsFree() {
             <Waves size={14} />
             {statusLabel}
           </p>
+          {state === STATE.LISTENING && (
+            <p style={{ fontSize: 11, color: 'var(--sv-muted)', marginTop: 4 }}>
+              {t('tapAgainToStop') || 'Tap again when done'}
+            </p>
+          )}
         </div>
 
         {(lastQuestion || lastAnswer) && (
@@ -219,7 +245,7 @@ export default function HandsFree() {
             value={prefs.spoken}
             onChange={(v) => update({ spoken: v })}
           />
-          <div className="sv-card">
+          {/* <div className="sv-card">
             <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--sv-ink)', marginBottom: 8 }}>{t('activationTitle')}</p>
             <div style={{ display: 'flex', gap: 8 }}>
               {['wake', 'ptt'].map((mode) => (
@@ -242,7 +268,7 @@ export default function HandsFree() {
                 {t('wakeWordHint')}
               </p>
             )}
-          </div>
+          </div> */}
         </div>
       </div>
     </div>

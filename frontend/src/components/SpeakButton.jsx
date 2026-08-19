@@ -9,8 +9,15 @@ import { useToast } from '../lib/toast';
  * (Api.speak — already implemented in lib/api.js, just never had
  * a UI control wired to it). Three states: idle, loading (fetching
  * audio), playing (tap again to stop).
+ *
+ * `lang` lets a caller pass the Sarvam-detected language_code for
+ * this specific piece of text (e.g. a clarifying question or spoken
+ * confirmation that was generated in the worker's own spoken
+ * language). Falls back to getLanguage() only when no `lang` prop
+ * is given, so existing callers that never pass one keep working
+ * unchanged.
  */
-export default function SpeakButton({ text, size = 14, style }) {
+export default function SpeakButton({ text, lang, size = 14, style, label }) {
   const [status, setStatus] = useState('idle'); // idle | loading | playing
   const audioRef = useRef(null);
   const urlRef = useRef(null);
@@ -36,7 +43,7 @@ export default function SpeakButton({ text, size = 14, style }) {
     if (!text?.trim()) return;
     setStatus('loading');
     try {
-      const { blob } = await Api.speak(text, getLanguage());
+      const { blob } = await Api.speak(text, lang || getLanguage());
       const url = URL.createObjectURL(blob);
       urlRef.current = url;
       const audio = new Audio(url);
@@ -66,7 +73,7 @@ export default function SpeakButton({ text, size = 14, style }) {
       }}
     >
       <Icon size={size} className={status === 'loading' ? 'sv-spin' : undefined} />
-      {status === 'playing' ? 'Stop' : status === 'loading' ? '' : 'Listen'}
+      {status === 'playing' ? 'Stop' : status === 'loading' ? '' : (label || 'Listen')}
     </button>
   );
 }

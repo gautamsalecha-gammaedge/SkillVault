@@ -26,10 +26,15 @@ class CheckKnowledgeRequest(BaseModel):
     text: str
     machine_id: str
     round: int = 1
+    language_code: str = "en-IN"
     # round = which clarification round this check call represents.
     # round 1 = first attempt. round 2 = after the worker answered one
     # clarifying question. The backend forces completion at round >= 2,
     # regardless of what the model thinks, to cap the back-and-forth.
+    # language_code = the language Sarvam STT detected when the worker
+    # spoke the tip (or the frontend's default, if typed instead of
+    # spoken) - used so any clarifying question comes back phrased in
+    # the same language, not guessed by the model from the text.
 
 
 class AdminLoginRequest(BaseModel):
@@ -50,3 +55,7 @@ class WorkerLoginRequest(BaseModel):
 class AssignMachineRequest(BaseModel):
     worker_id: str
     machine_id: str
+
+
+class EditEntryRequest(BaseModel):
+    text: str

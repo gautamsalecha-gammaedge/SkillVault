@@ -30,10 +30,15 @@ TOKEN_EXPIRY_HOURS = int(os.environ.get("TOKEN_EXPIRY_HOURS", "24"))
 CHROMA_PATH = "./chroma_db"
 CHROMA_COLLECTION_NAME = "skillvault_knowledge"
 
-# --- Sarvam AI (text-to-speech) ---
+# --- Sarvam AI (text-to-speech + speech-to-text) ---
 SARVAM_API_KEY = os.environ["SARVAM_API_KEY"]
 SARVAM_TTS_MODEL = "bulbul:v3"
 SARVAM_TTS_DEFAULT_SPEAKER = "shubh"
+# Saaras is a SEPARATE model family from Saarika, with its own version
+# numbers - "saarika:v4" does not exist and will 400 at Sarvam's API.
+# saaras:v4 is the current recommended transcription model; it requires
+# mode="transcribe" to be passed alongside it (see voice/stt.py).
+SARVAM_STT_MODEL = "saaras:v4"
 
 # How long generated audio stays cached before it's considered stale and
 # regenerated on next request. Defaults to 24 hours if not set in .env.

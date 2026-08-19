@@ -13,10 +13,10 @@ DELETE /admin/reject-worker/{id}       - admin rejects/removes a worker's regist
 import secrets
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-
+from rag.embeddings import embed_text_with_retry
 from db import get_db
 from models import AdminSession, Worker , WorkerSession , WorkerMachine
-from schemas import AdminLoginRequest , AssignMachineRequest
+from schemas import AdminLoginRequest , AssignMachineRequest , EditEntryRequest
 from auth.security import make_expiry_time
 from auth.admin_auth import require_admin
 from rag.chroma_store import collection , list_manuals, delete_manual , list_all_machine_ids
@@ -246,3 +246,24 @@ def get_worker_machines(worker_id: str, authorized: bool = Depends(require_admin
     """Lists every machine currently assigned to one worker - for the admin assignment screen."""
     assignments = db.query(WorkerMachine).filter(WorkerMachine.worker_id == worker_id).all()
     return {"worker_id": worker_id, "machine_ids": [a.machine_id for a in assignments]}
+
+
+@router.put("/edit/{entry_id}")
+def edit_entry(entry_id: str, req: EditEntryRequest, authorized: bool = Depends(require_admin)):
+    """Updates the text of a pending (or approved) knowledge entry in place, keeping its existing metadata/status."""
+    existing = collection.get(ids=[entry_id])
+    if not existing["ids"]:
+        raise HTTPException(status_code=404, detail="Entry not found.")
+
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text cannot be empty.")
+
+    try:
+        embedding = embed_text_with_retry(text, task_type="RETRIEVAL_DOCUMENT")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to re-embed edited text: {e}")
+
+    collection.update(ids=[entry_id], documents=[text], embeddings=[embedding])
+
+    return {"status": "edited", "id": entry_id, "text": text}

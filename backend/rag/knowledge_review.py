@@ -18,6 +18,15 @@ model call (to keep cost/latency down):
 The round cap (max clarifying rounds) is enforced by the caller
 (routers/knowledge.py), not here - this function always just reports
 what the model thinks; routers/knowledge.py decides whether to listen.
+
+Language: the worker's spoken/written language is now detected
+up front by Sarvam STT (voice/stt.py) at the point of recording, and
+passed in here as language_code - the LLM is no longer asked to guess
+it from the text itself. This is more reliable (Sarvam's dedicated
+language-ID is better at this than an LLM eyeballing a short tip) and
+keeps the language consistent across the whole round-trip: the same
+code that transcribed the audio is used to phrase the clarifying
+question, and later to pick the TTS voice for speaking it back.
 """
 
 import json
@@ -25,6 +34,8 @@ import json
 from rag.llm_provider import generate_text
 
 REVIEW_AND_POLISH_PROMPT = """You are reviewing a tip a factory worker wants to add to a shared knowledge base for other workers on machine {machine_id}.
+
+The worker's spoken/written language is: {language_code}. Write any question in that exact language and script - do not switch languages or transliterate.
 
 Do two things:
 
@@ -39,25 +50,30 @@ Respond with exactly this JSON structure:
 
 If asking a question: phrase it the way a helpful coworker would ask out loud, and briefly acknowledge what's already clear before naming the one specific thing that's missing (e.g. "Got it that it's the spindle - but what did you actually do to fix it?"). Ask about only the SINGLE most important missing piece, never more than one question.
 
-Detect the language and script the tip was written in, and write the question (if any) in that same language and script (English stays English; Hindi in Devanagari stays Devanagari; Hinglish - Hindi in Roman letters - stays Hinglish in Roman letters).
-
 Respond with ONLY the JSON object, no other text, no markdown formatting."""
 
 
-def review_knowledge(text: str, machine_id: str) -> dict:
+def review_knowledge(text: str, machine_id: str, language_code: str = "en-IN") -> dict:
     """
-    Returns {"complete": bool, "question": str|None, "polished_text": str}.
+    Returns {"complete": bool, "question": str|None, "polished_text": str, "language_code": str}.
     Always returns a polished_text, regardless of completeness - grammar
     cleanup is independent of whether the content itself needs more detail.
+
+    language_code: the language Sarvam STT detected when the worker spoke
+    (or the language their typed text is in, if typed instead of spoken).
+    Passed straight through into the returned dict so the caller
+    (routers/knowledge.py) can forward it to the frontend without having
+    to re-derive it - the frontend then uses it to pick which language
+    the clarifying question / confirmation is spoken back in via /speak.
     """
-    prompt = REVIEW_AND_POLISH_PROMPT.format(text=text, machine_id=machine_id)
+    prompt = REVIEW_AND_POLISH_PROMPT.format(text=text, machine_id=machine_id, language_code=language_code)
 
     try:
         raw = generate_text(prompt).strip()
     except Exception:
         # If even the fallback provider fails, don't block the worker -
         # treat as complete and keep their original wording untouched.
-        return {"complete": True, "question": None, "polished_text": text}
+        return {"complete": True, "question": None, "polished_text": text, "language_code": language_code}
 
     if raw.startswith("```"):
         raw = raw.strip("`")
@@ -69,11 +85,12 @@ def review_knowledge(text: str, machine_id: str) -> dict:
         result = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         # Model didn't return clean JSON - fail safe: complete, original text.
-        return {"complete": True, "question": None, "polished_text": text}
+        return {"complete": True, "question": None, "polished_text": text, "language_code": language_code}
 
     complete = bool(result.get("complete", True))
     return {
         "complete": complete,
         "question": None if complete else result.get("question"),
         "polished_text": result.get("polished_text") or text,
+        "language_code": language_code,
     }

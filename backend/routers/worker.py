@@ -1,10 +1,13 @@
 """
 routers/worker.py
 
-POST /worker/register - one-time worker account creation (saved in Postgres).
-                         Starts out unapproved (is_approved=False) until an admin approves it.
-POST /worker/login     - worker logs in, gets a token that expires after TOKEN_EXPIRY_HOURS.
-                         Blocked with a 403 until the account has been approved by an admin.
+POST /worker/register  - one-time worker account creation (saved in Postgres).
+                          Starts out unapproved (is_approved=False) until an admin approves it.
+POST /worker/login      - worker logs in, gets a token that expires after TOKEN_EXPIRY_HOURS.
+                          Blocked with a 403 until the account has been approved by an admin.
+GET  /worker/my-machines - returns only the machines this worker has been assigned.
+GET  /worker/my-tips    - returns every knowledge entry this worker has personally
+                          submitted, with each one's current status.
 """
 
 import secrets
@@ -12,13 +15,14 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from db import get_db
-from models import Worker, WorkerSession , WorkerMachine
+from models import Worker, WorkerSession, WorkerMachine
 from schemas import WorkerRegisterRequest, WorkerLoginRequest
 from auth.security import hash_password, verify_password, make_expiry_time
 from config import TOKEN_EXPIRY_HOURS
 from auth.worker_auth import require_worker
+from rag.chroma_store import collection
 
-router = APIRouter(prefix="/worker" , tags=["worker"])
+router = APIRouter(prefix="/worker", tags=["worker"])
 
 
 @router.post("/register")
@@ -71,8 +75,39 @@ def worker_login(req: WorkerLoginRequest, db: Session = Depends(get_db)):
         "message": "Login successful. Use this token in the Authorization header as 'Bearer <token>'.",
     }
 
+
 @router.get("/my-machines")
 def my_machines(worker: dict = Depends(require_worker), db: Session = Depends(get_db)):
     """Returns only the machines THIS logged-in worker has been assigned by admin."""
     assignments = db.query(WorkerMachine).filter(WorkerMachine.worker_id == worker["worker_id"]).all()
     return {"machine_ids": [a.machine_id for a in assignments]}
+
+
+@router.get("/my-tips")
+def my_tips(worker: dict = Depends(require_worker)):
+    """
+    Returns every knowledge entry this worker has personally submitted,
+    across all machines, with each one's current status.
+
+    Status is either "pending" (awaiting admin review, not yet
+    searchable via /ask) or "approved" (live in the knowledge base).
+    There is no "rejected" status - rejecting a tip is a hard delete
+    (see admin.py's delete_entry), so a rejected tip simply stops
+    appearing here rather than showing a rejected badge.
+
+    No submission timestamp is stored today, so results aren't sorted
+    by date - only whatever order Chroma returns them in.
+    """
+    results = collection.get(where={"worker_id": worker["worker_id"]})
+
+    tips = []
+    for i in range(len(results["ids"])):
+        meta = results["metadatas"][i]
+        tips.append({
+            "id": results["ids"][i],
+            "text": results["documents"][i],
+            "machine_id": meta.get("machine_id"),
+            "status": meta.get("status", "pending"),
+        })
+
+    return {"tips": tips}
