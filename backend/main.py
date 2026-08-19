@@ -20,17 +20,25 @@ Run it with:
     uvicorn main:app --reload
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from routers import ask, knowledge, worker, admin, voice
 
+# Rate limiter based on client IP
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="SkillVault AI Backend")
 
-# Allows the browser-based frontend (opened as a local file, or served from
-# a different origin/port) to actually call this API. Without this, the
-# browser blocks the request before it reaches any endpoint - which is
-# exactly what "Failed to fetch" in the voice test page means.
+# Attach the limiter to the app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS - currently open for local development
+# TODO: Restrict origins in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

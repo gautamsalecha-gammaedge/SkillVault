@@ -40,8 +40,9 @@ def check_knowledge(req: CheckKnowledgeRequest, worker: dict = Depends(require_w
 @router.post("/add-knowledge")
 def add_knowledge(req: AddKnowledgeRequest, worker: dict = Depends(require_worker)):
     embedding = embed_text(req.text, task_type="RETRIEVAL_DOCUMENT")
+    import uuid
+    entry_id = f"{req.machine_id}-worker-{worker['worker_id']}-{uuid.uuid4().hex[:12]}"
 
-    entry_id = f"{req.machine_id}-worker-{worker['worker_id']}-{hash(req.text) % 100000}"
     collection.upsert(
         ids=[entry_id],
         embeddings=[embedding],

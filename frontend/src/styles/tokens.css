@@ -1,0 +1,118 @@
+/* ============================================================
+   SkillVault — Professional Design System
+   MNC-Grade Tokens for Cross-Device Excellence
+   ============================================================ */
+
+:root {
+  /* ---- Light Color Palette (Professional) ---- */
+  --sv-bg: #FAFBFC;
+  --sv-bg-secondary: #F3F5F8;
+  --sv-surface: #FFFFFF;
+  --sv-surface-hover: #F9FAFB;
+  --sv-activation-bg: #0F1419;
+  --sv-activation-text: #FFFFFF;
+  --sv-activation-border: #CBD5E1;
+  --sv-question-bg: #E7EEF6;
+  --sv-question-text: #162536;
+  --sv-ink: #0F1419;
+  --sv-ink-secondary: #475569;
+  --sv-muted: #64748B;
+  --sv-muted-light: #94A3B8;
+  
+  /* Brand Colors */
+  --sv-brass: #B8792D;
+  --sv-brass-dark: #8B5A1F;
+  --sv-brass-light: #D4915C;
+  --sv-brass-soft: #FEF3E2;
+  --sv-brass-hover: #A0671F;
+  
+  --sv-teal: #1F7A5C;
+  --sv-teal-dark: #145645;
+  --sv-teal-light: #4A9F7E;
+  --sv-teal-soft: #E8F5EF;
+  --sv-teal-hover: #1A6B52;
+  
+  /* Status & Semantic Colors */
+  --sv-success: #10B981;
+  --sv-success-soft: #ECFDF5;
+  --sv-warning: #F59E0B;
+  --sv-warning-soft: #FEF3C7;
+  --sv-danger: #EF4444;
+  --sv-danger-soft: #FEE2E2;
+  --sv-info: #0EA5E9;
+  --sv-info-soft: #F0F9FF;
+  
+  /* UI Elements */
+  --sv-border: #E2E8F0;
+  --sv-border-light: #F1F5F9;
+  --sv-divider: #E8EAED;
+  --sv-offline-bg: #FEF9E7;
+  
+  /* Typography */
+  --sv-font-display: 'Space Grotesk', sans-serif;
+  --sv-font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --sv-font-mono: 'IBM Plex Mono', monospace;
+  --sv-font-i18n: 'Noto Sans', 'Noto Sans Devanagari', 'Noto Sans Tamil', 'Noto Sans Arabic', sans-serif;
+  
+  /* Spacing & Sizing */
+  --sv-radius-xs: 4px;
+  --sv-radius-sm: 8px;
+  --sv-radius-md: 12px;
+  --sv-radius-lg: 16px;
+  --sv-radius-xl: 20px;
+  --sv-radius-full: 999px;
+  
+  /* Shadows - Professional depth */
+  --sv-shadow-xs: 0 1px 2px rgba(15, 20, 25, 0.04);
+  --sv-shadow-sm: 0 1px 3px rgba(15, 20, 25, 0.08);
+  --sv-shadow-md: 0 4px 6px rgba(15, 20, 25, 0.1);
+  --sv-shadow-lg: 0 10px 15px rgba(15, 20, 25, 0.15);
+  --sv-shadow-xl: 0 20px 25px rgba(15, 20, 25, 0.2);
+  
+  /* Transitions */
+  --sv-transition-fast: 150ms ease-out;
+  --sv-transition-base: 200ms ease-out;
+  --sv-transition-slow: 300ms ease-out;
+}
+
+[data-theme='dark'] {
+  --sv-bg: #0F1419;
+  --sv-bg-secondary: #1A1F2E;
+  --sv-surface: #161B28;
+  --sv-surface-hover: #1F2434;
+  --sv-activation-bg: #34445C;
+  --sv-activation-text: #F8FAFC;
+  --sv-activation-border: #46546B;
+  --sv-question-bg: #2A3547;
+  --sv-question-text: #F8FAFC;
+  --sv-ink: #F8FAFB;
+  --sv-ink-secondary: #CBD5E1;
+  --sv-muted: #94A3B8;
+  --sv-muted-light: #64748B;
+  
+  --sv-brass: #D4915C;
+  --sv-brass-dark: #8B5A1F;
+  --sv-brass-light: #A0671F;
+  --sv-brass-soft: #2C2110;
+  --sv-brass-hover: #C7804D;
+  
+  --sv-teal: #4A9F7E;
+  --sv-teal-dark: #1F7A5C;
+  --sv-teal-light: #2A8F6D;
+  --sv-teal-soft: #1A3A32;
+  --sv-teal-hover: #3A8F6D;
+  
+  --sv-success: #34D399;
+  --sv-success-soft: #1A3A2E;
+  --sv-warning: #FCD34D;
+  --sv-warning-soft: #3A2E1A;
+  --sv-danger: #F87171;
+  --sv-danger-soft: #3A1A1A;
+  --sv-info: #38BDF8;
+  --sv-info-soft: #1A2A3A;
+  
+  --sv-border: #2D3748;
+  --sv-border-light: #3F475E;
+  --sv-divider: #252D3D;
+  --sv-offline-bg: #332810;
+}

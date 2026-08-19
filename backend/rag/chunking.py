@@ -88,7 +88,6 @@ def _recursive_split(text: str, chunk_size: int, separators: list[str]):
             sub_pieces, _ = _recursive_split(piece, chunk_size, remaining)
             good_pieces.extend(sub_pieces)
         else:
-            # Last resort: just keep it (will be handled by merge logic)
             good_pieces.append(piece)
 
     return good_pieces, separator

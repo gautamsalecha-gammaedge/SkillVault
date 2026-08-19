@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from db import get_db
 from models import Worker, WorkerSession , WorkerMachine
 from schemas import WorkerRegisterRequest, WorkerLoginRequest
-from auth.security import hash_password, make_expiry_time
+from auth.security import hash_password, verify_password, make_expiry_time
 from config import TOKEN_EXPIRY_HOURS
 from auth.worker_auth import require_worker
 
@@ -53,7 +53,7 @@ def worker_login(req: WorkerLoginRequest, db: Session = Depends(get_db)):
     if not worker:
         raise HTTPException(status_code=401, detail="Worker ID not found. Please register first.")
 
-    if worker.password_hash != hash_password(req.password):
+    if not verify_password(req.password, worker.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect password.")
 
     if not worker.is_approved:

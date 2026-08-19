@@ -1,7 +1,7 @@
 """
 rag/confirmations.py
 
-Short, natural-sounding confirmation phrases for /add-knowledge, used
+Short, natural-sounding confirmation phrases for /add-knowledge or /add-tip, used
 only for the spoken response (via /speak) - not for what gets stored.
 Kept separate from ANSWER_PROMPT since this doesn't go through Gemini:
 it's a fixed, short message, so a static phrase per language is simpler

@@ -43,4 +43,4 @@ AUDIO_CACHE_TTL_HOURS = int(os.environ.get("AUDIO_CACHE_TTL_HOURS", "24"))
 # Optional - if not set in .env, the app just skips the fallback and
 # surfaces the original Gemini error instead.
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"
