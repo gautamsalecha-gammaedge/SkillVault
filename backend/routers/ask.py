@@ -4,7 +4,7 @@ routers/ask.py
 POST /ask - worker asks a question, gets an answer grounded in the
 knowledge base (manual chunks + approved worker tips) for one machine.
 
-Now requires a valid worker token + the worker must be assigned to the machine.
+Now also returns video_url if the best matching tip has a video.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -60,16 +60,30 @@ def ask(
     )
 
     retrieved_chunks = results["documents"][0] if results["documents"] else []
-    context = "\n\n".join(retrieved_chunks)
+    retrieved_metadatas = results["metadatas"][0] if results["metadatas"] else []
 
-    if not context:
-        return {"answer": "I don't have any knowledge saved for this machine yet."}
+    if not retrieved_chunks:
+        return {
+            "answer": "I don't have any knowledge saved for this machine yet.",
+            "sources_used": 0,
+            "video_url": None,
+        }
+
+    context = "\n\n".join(retrieved_chunks)
 
     # 4. Generate answer
     prompt = ANSWER_PROMPT.format(context=context, question=req.question)
     answer_text = generate_text(prompt)
 
+    # 5. Find the first video_url from the retrieved tips (if any)
+    video_url = None
+    for meta in retrieved_metadatas:
+        if meta.get("video_url"):
+            video_url = meta["video_url"]
+            break
+
     return {
         "answer": answer_text,
         "sources_used": len(retrieved_chunks),
+        "video_url": video_url,
     }

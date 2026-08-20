@@ -22,9 +22,11 @@ Run it with:
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+import os
 
 from routers import ask, knowledge, worker, admin, voice, tickets
 
@@ -47,6 +49,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---------- Video / Uploads support ----------
+os.makedirs("uploads/videos", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# ---------- Routers ----------
 app.include_router(ask.router)
 app.include_router(knowledge.router)
 app.include_router(worker.router)

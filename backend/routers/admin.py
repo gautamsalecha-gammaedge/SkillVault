@@ -102,15 +102,30 @@ def get_all_workers(authorized: bool = Depends(require_admin), db: Session = Dep
 
 # --- Worker account approval ---
 
-@router.get("/pending-workers")
-def get_pending_workers(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    """Returns every worker account still waiting for admin approval."""
-    pending = db.query(Worker).filter(Worker.is_approved == False).all()  # noqa: E712
-    return {
-        "pending_workers": [
-            {"worker_id": w.worker_id, "name": w.name} for w in pending
-        ]
-    }
+@router.get("/pending")
+def get_pending(machine_id: str, authorized: bool = Depends(require_admin)):
+    """Returns all worker-added knowledge entries still waiting for admin approval, for one machine."""
+    results = collection.get(
+        where={
+            "$and": [
+                {"machine_id": machine_id},
+                {"status": "pending"},
+            ]
+        }
+    )
+    entries = []
+    for i in range(len(results["ids"])):
+        meta = results["metadatas"][i]
+        entries.append({
+            "id": results["ids"][i],
+            "text": results["documents"][i],
+            "worker_id": meta.get("worker_id"),
+            "worker_name": meta.get("worker_name"),
+            "video_url": meta.get("video_url") or None,
+            "transcript": meta.get("transcript") or "",
+            "video_description": meta.get("video_description") or "",
+        })
+    return {"pending_entries": entries}
 
 
 @router.post("/approve-worker/{worker_id}")
