@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react';
-import { Mic, MessageCircleQuestion, Sparkles, CheckCircle2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Mic, MessageCircleQuestion, Sparkles, CheckCircle2, Video, VideoOff, Upload, X, Film } from 'lucide-react';
 import MachineSelect from '../../components/MachineSelect';
 import SpeakButton from '../../components/SpeakButton';
-import { Api } from '../../lib/api';
+import { Api, mediaUrl } from '../../lib/api';
 import { useVoiceRecorder } from '../../lib/useVoiceRecorder';
+import { useVideoRecorder } from '../../lib/useVideoRecorder';
 import { useToast } from '../../lib/toast';
 import { useI18n } from '../../lib/i18n';
+
+const MAX_VIDEO_BYTES = 80 * 1024 * 1024; // matches backend's 80MB limit
+const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'];
 
 const PHASE = { WRITING: 'writing', CLARIFYING: 'clarifying', REVIEW: 'review', SUCCESS: 'success' };
 
@@ -35,6 +39,137 @@ function MicButton({ active, onClick, disabled, label }) {
     >
       <Mic size={17} />
     </button>
+  );
+}
+
+/**
+ * Optional video attachment for a tip. Two ways in: record a short clip
+ * with the camera (useVideoRecorder), or pick an existing file. Either
+ * way ends up as a plain File the caller hands to Api.addKnowledge —
+ * the backend sends it to Gemini for understanding on final submit
+ * (see routers/knowledge.py), so no preview/description is generated
+ * client-side, just a local playback preview.
+ */
+function VideoAttach({ t, videoFile, onPick, onClear, disabled }) {
+  const { recording, stream, start, stop, cancel } = useVideoRecorder();
+  const liveRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const { push } = useToast();
+
+  useEffect(() => {
+    if (liveRef.current) liveRef.current.srcObject = stream || null;
+  }, [stream]);
+
+  useEffect(() => () => cancel(), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!videoFile) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(videoFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [videoFile]);
+
+  async function handleStartRecording() {
+    start((err) => push(err, 'error'));
+  }
+
+  async function handleStopRecording() {
+    const file = await stop();
+    if (file) onPick(file);
+  }
+
+  function handleFilePick(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+      push(t('videoTypeError') || 'Only MP4, WebM, MOV or AVI videos are allowed.', 'error');
+      return;
+    }
+    if (file.size > MAX_VIDEO_BYTES) {
+      push(t('videoSizeError') || 'Video is too large. Maximum size is 80 MB.', 'error');
+      return;
+    }
+    onPick(file);
+  }
+
+  if (recording) {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ position: 'relative', borderRadius: 'var(--sv-radius-md)', overflow: 'hidden', background: '#000' }}>
+          <video ref={liveRef} autoPlay muted playsInline style={{ width: '100%', maxHeight: 220, display: 'block', objectFit: 'cover' }} />
+          <span style={{
+            position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 6,
+            fontSize: 11, fontWeight: 700, color: '#fff', background: 'rgba(222,100,100,0.9)',
+            padding: '3px 10px', borderRadius: 'var(--sv-radius-full)',
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />
+            {t('recordingNow') || 'Recording…'}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="sv-btn sv-btn--primary sv-btn--full"
+          style={{ marginTop: 10 }}
+          onClick={handleStopRecording}
+        >
+          <VideoOff size={15} /> {t('stopRecordingBtn') || 'Stop recording'}
+        </button>
+      </div>
+    );
+  }
+
+  if (videoFile) {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ position: 'relative', borderRadius: 'var(--sv-radius-md)', overflow: 'hidden', background: '#000' }}>
+          <video src={previewUrl} controls style={{ width: '100%', maxHeight: 220, display: 'block' }} />
+          <button
+            type="button"
+            onClick={onClear}
+            aria-label={t('removeVideoAria') || 'Remove video'}
+            style={{
+              position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none',
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Film size={12} /> {videoFile.name}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <button
+        type="button"
+        className="sv-btn sv-btn--outline"
+        style={{ flex: 1, justifyContent: 'center' }}
+        disabled={disabled}
+        onClick={handleStartRecording}
+      >
+        <Video size={15} /> {t('recordVideoBtn') || 'Record a video'}
+      </button>
+      <button
+        type="button"
+        className="sv-btn sv-btn--outline"
+        style={{ flex: 1, justifyContent: 'center' }}
+        disabled={disabled}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <Upload size={15} /> {t('uploadVideoBtn') || 'Upload a video'}
+      </button>
+      <input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo" hidden onChange={handleFilePick} />
+    </div>
   );
 }
 
@@ -69,6 +204,11 @@ export default function AddTip() {
   const [spokenConfirmation, setSpokenConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
   const [micTarget, setMicTarget] = useState(null); // 'tip' | 'clarify' | null
+  // Optional video demo attached to the tip — recorded or uploaded in the
+  // WRITING step, carried through clarification/review, sent on saveTip.
+  const [videoFile, setVideoFile] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null); // 0-100 while a video is uploading
+  const [savedVideoUrl, setSavedVideoUrl] = useState(null); // video_url returned after a successful save
   // Language auto-detected by Sarvam STT from the worker's own voice.
   // Replaces the old getLanguage()/stored-setting approach entirely -
   // there is no picker, this just updates every time they speak.
@@ -141,15 +281,24 @@ export default function AddTip() {
 
   async function saveTip() {
     setBusy(true);
+    if (videoFile) setUploadProgress(0);
     try {
-      const res = await Api.addKnowledge(polishedText, machine, detectedLang);
+      const res = await Api.addKnowledge(
+        polishedText,
+        machine,
+        detectedLang,
+        videoFile,
+        videoFile ? (frac) => setUploadProgress(Math.round(frac * 100)) : null,
+      );
       setSpokenConfirmation(res.spoken_confirmation || '');
+      setSavedVideoUrl(res.video_url || null);
       push(t('tipSavedSuccess'), 'success');
       setPhase(PHASE.SUCCESS);
     } catch (err) {
       push(err.message, 'error');
     } finally {
       setBusy(false);
+      setUploadProgress(null);
     }
   }
 
@@ -162,6 +311,9 @@ export default function AddTip() {
     setPolishedText('');
     setSpokenConfirmation('');
     setDetectedLang(DEFAULT_LANG);
+    setVideoFile(null);
+    setUploadProgress(null);
+    setSavedVideoUrl(null);
     setPhase(PHASE.WRITING);
   }
 
@@ -215,6 +367,18 @@ export default function AddTip() {
                 {t('transcribing') || 'Transcribing…'}
               </p>
             )}
+
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--sv-muted)', marginBottom: 8 }}>
+              {t('attachVideoLabel') || 'Add a quick video demo (optional)'}
+            </p>
+            <VideoAttach
+              t={t}
+              videoFile={videoFile}
+              onPick={setVideoFile}
+              onClear={() => setVideoFile(null)}
+              disabled={!machine}
+            />
+
             <button className="sv-btn sv-btn--primary sv-btn--full" disabled={!tipText.trim() || !machine || busy} onClick={reviewTip}>
               {busy ? t('reviewingTip') : t('reviewTipBtn')}
             </button>
@@ -291,8 +455,30 @@ export default function AddTip() {
               value={polishedText}
               onChange={(e) => setPolishedText(e.target.value)}
             />
+
+            {videoFile && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--sv-muted)',
+                marginBottom: 16, padding: '8px 12px', background: 'var(--sv-bg)', borderRadius: 'var(--sv-radius-sm)',
+              }}>
+                <Film size={13} />
+                {t('videoWillBeAttached', { name: videoFile.name }) || `"${videoFile.name}" will be attached to this tip.`}
+              </div>
+            )}
+
+            {uploadProgress !== null && (
+              <div style={{ marginBottom: 16 }}>
+                <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginBottom: 4 }}>
+                  {t('uploadingVideo') || 'Uploading video…'} {uploadProgress}%
+                </p>
+                <div style={{ height: 6, borderRadius: 'var(--sv-radius-full)', background: 'var(--sv-border)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${uploadProgress}%`, background: 'var(--sv-brass)', transition: 'width 0.15s ease' }} />
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="sv-btn sv-btn--outline" onClick={reset}>{t('startOver')}</button>
+              <button className="sv-btn sv-btn--outline" disabled={busy} onClick={reset}>{t('startOver')}</button>
               <button className="sv-btn sv-btn--primary" style={{ flex: 1 }} disabled={!polishedText.trim() || busy} onClick={saveTip}>
                 {busy ? t('savingTip') : t('saveTipBtn')}
               </button>
@@ -314,6 +500,14 @@ export default function AddTip() {
             <p style={{ fontSize: 13, color: 'var(--sv-muted)', marginBottom: 18 }}>
               {t('tipSuccessBody') || 'Sent for approval.'}
             </p>
+
+            {savedVideoUrl && (
+              <video
+                src={mediaUrl(savedVideoUrl)}
+                controls
+                style={{ width: '100%', maxHeight: 220, borderRadius: 'var(--sv-radius-md)', marginBottom: 18, background: '#000' }}
+              />
+            )}
 
             {spokenConfirmation && (
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>

@@ -14,6 +14,19 @@ import { getWorkerToken, getAdminToken, clearWorkerSession, clearAdminSession } 
 
 const API_BASE = localStorage.getItem('sv_api_base') || 'http://127.0.0.1:8000';
 
+/**
+ * video_url (from /ask and /admin/pending) comes back as a path relative
+ * to the backend, e.g. "/uploads/videos/CNC-204/abc123.mp4" — the backend
+ * mounts /uploads as static files (main.py), it isn't a full URL. Any
+ * caller that wants to actually play the video needs it resolved
+ * against API_BASE first.
+ */
+export function mediaUrl(path) {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
 export class ApiError extends Error {
   constructor(status, message) {
     super(message);
@@ -154,6 +167,46 @@ function transcribeXhr(audioBlob) {
   });
 }
 
+/**
+ * POST /Knowledge/add-knowledge now takes multipart/form-data (text,
+ * machine_id, language_code, and an optional video file) instead of a
+ * JSON body, so the video can be forwarded to Gemini for understanding
+ * server-side. Uses XHR (like uploadManualXhr) so a video attachment
+ * gets an upload progress callback — text-only submissions still work,
+ * onProgress just never fires since there's nothing to upload.
+ */
+function addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('text', text);
+    form.append('machine_id', machine_id);
+    form.append('language_code', language_code);
+    if (videoFile) form.append('video', videoFile);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/Knowledge/add-knowledge`);
+    const token = getWorkerToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+      } else {
+        if (xhr.status === 401 || xhr.status === 403) clearWorkerSession();
+        reject(new ApiError(xhr.status, (data && data.detail) || 'Something went wrong. Please try again.'));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'Network error — check your connection and try again.'));
+    xhr.send(form);
+  });
+}
+
 export const Api = {
   /* ---------------- Worker ---------------- */
   workerRegister: (worker_id, password, name) =>
@@ -228,18 +281,15 @@ export const Api = {
       body: { text, machine_id, round, language_code },
     }),
 
-  addKnowledge: (text, machine_id, language_code) =>
-    apiFetch('/Knowledge/add-knowledge', { method: 'POST', auth: 'worker', body: { text, machine_id, language_code } }),
+  /* Now multipart (text, machine_id, language_code, + optional video file)
+     since the backend forwards an attached video to Gemini for
+     understanding. videoFile and onProgress are both optional — omit
+     both for a plain text tip, exactly like before. Response now also
+     includes video_url when a video was attached. */
+  addKnowledge: (text, machine_id, language_code, videoFile = null, onProgress = null) =>
+    addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress),
 
   speak: (text, language_code) => apiFetchBinary('/speak', { body: { text, language_code } }),
-
-  /* Records audio -> Sarvam STT transcribes it AND auto-detects the
-     spoken language in one call. Returns { transcript, language_code }.
-     No language is ever passed in here - that's the whole point,
-     Sarvam figures it out from the audio itself. */
-  transcribe: (audioBlob) => transcribeXhr(audioBlob),
-
-    speak: (text, language_code) => apiFetchBinary('/speak', { body: { text, language_code } }),
 
   /* Records audio -> Sarvam STT transcribes it AND auto-detects the
      spoken language in one call. Returns { transcript, language_code }.

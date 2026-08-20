@@ -1,8 +1,64 @@
 import { useEffect, useState } from 'react';
-import { Search, Pencil, Info, Check, X } from 'lucide-react';
+import { Search, Pencil, Check, X, Film, ChevronDown } from 'lucide-react';
 import Stamp from '../../components/Stamp';
-import { Api } from '../../lib/api';
+import { Api, mediaUrl } from '../../lib/api';
 import { useToast } from '../../lib/toast';
+
+/**
+ * The backend embeds+stores the worker's tip text with the Gemini video
+ * understanding appended (see routers/knowledge.py: "\n\n[Video
+ * Understanding]: ..." / "\n\n[Transcript]: ..."), so entry.text for a
+ * video tip includes that appendix. Strip it back off for display here —
+ * the video player + a separate expandable transcript cover that same
+ * information without repeating raw appended text in the main tip body.
+ */
+function tipTextOnly(text) {
+  const idx = text.indexOf('\n\n[Video Understanding]:');
+  return idx === -1 ? text : text.slice(0, idx).trim();
+}
+
+function VideoBlock({ entry, open, onToggle }) {
+  const hasDetails = entry.video_description || entry.transcript;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <video
+        src={mediaUrl(entry.video_url)}
+        controls
+        style={{ width: '100%', maxHeight: 200, borderRadius: 'var(--sv-radius-sm)', background: '#000', display: 'block' }}
+      />
+      {hasDetails && (
+        <div style={{ marginTop: 6 }}>
+          <button
+            type="button"
+            onClick={onToggle}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600,
+              color: 'var(--sv-brass)', background: 'none', border: 'none', padding: 0,
+            }}
+          >
+            <Film size={12} />
+            {open ? 'Hide' : 'Show'} AI video summary
+            <ChevronDown size={13} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+          </button>
+          {open && (
+            <div style={{ marginTop: 8, padding: 10, background: 'var(--sv-bg)', borderRadius: 'var(--sv-radius-sm)', fontSize: 12.5, color: 'var(--sv-muted)', lineHeight: 1.5 }}>
+              {entry.video_description && (
+                <p style={{ marginBottom: entry.transcript ? 8 : 0 }}>
+                  <strong style={{ color: 'var(--sv-ink)' }}>What the video shows: </strong>{entry.video_description}
+                </p>
+              )}
+              {entry.transcript && (
+                <p style={{ margin: 0 }}>
+                  <strong style={{ color: 'var(--sv-ink)' }}>Transcript: </strong>{entry.transcript}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function KnowledgeReview() {
   const [allMachines, setAllMachines] = useState([]);
@@ -13,6 +69,7 @@ export default function KnowledgeReview() {
   const [draftText, setDraftText] = useState('');
   const [busyId, setBusyId] = useState(null);
   const [savingId, setSavingId] = useState(null);
+  const [openVideoId, setOpenVideoId] = useState(null); // entry.id whose transcript/description is expanded
   const { push } = useToast();
 
   useEffect(() => {
@@ -60,7 +117,7 @@ export default function KnowledgeReview() {
 
   function startEdit(entry) {
     setEditingId(entry.id);
-    setDraftText(entry.text);
+    setDraftText(tipTextOnly(entry.text));
   }
 
   function cancelEdit() {
@@ -68,17 +125,24 @@ export default function KnowledgeReview() {
     setDraftText('');
   }
 
-  async function saveEdit(id) {
+  async function saveEdit(entry) {
     const trimmed = draftText.trim();
     if (!trimmed) {
       push('Tip text cannot be empty.', 'error');
       return;
     }
-    setSavingId(id);
+    // Re-append the video understanding/transcript (if any) so editing the
+    // worker's own wording doesn't silently drop the video context from
+    // what's actually stored and searched (see tipTextOnly's note above).
+    let fullText = trimmed;
+    if (entry.video_description) fullText += `\n\n[Video Understanding]: ${entry.video_description}`;
+    if (entry.transcript) fullText += `\n\n[Transcript]: ${entry.transcript}`;
+
+    setSavingId(entry.id);
     try {
-      await Api.editEntry(id, trimmed);
+      await Api.editEntry(entry.id, fullText);
       push('Entry updated.', 'success');
-      setEntries((e) => e.map((x) => (x.id === id ? { ...x, text: trimmed } : x)));
+      setEntries((e) => e.map((x) => (x.id === entry.id ? { ...x, text: fullText } : x)));
       setEditingId(null);
       setDraftText('');
     } catch (err) {
@@ -159,7 +223,11 @@ export default function KnowledgeReview() {
                   onChange={(e) => setDraftText(e.target.value)}
                 />
               ) : (
-                <p style={{ fontSize: 14, color: 'var(--sv-ink)', marginBottom: 12 }}>{entry.text}</p>
+                <p style={{ fontSize: 14, color: 'var(--sv-ink)', marginBottom: 12 }}>{tipTextOnly(entry.text)}</p>
+              )}
+
+              {!editing && entry.video_url && (
+                <VideoBlock entry={entry} open={openVideoId === entry.id} onToggle={() => setOpenVideoId((id) => (id === entry.id ? null : entry.id))} />
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -170,7 +238,7 @@ export default function KnowledgeReview() {
                       <button className="sv-btn sv-btn--outline" disabled={saving} onClick={cancelEdit}>
                         <X size={13} /> Cancel
                       </button>
-                      <button className="sv-btn sv-btn--teal" disabled={saving} onClick={() => saveEdit(entry.id)}>
+                      <button className="sv-btn sv-btn--teal" disabled={saving} onClick={() => saveEdit(entry)}>
                         <Check size={13} /> {saving ? 'Saving…' : 'Save'}
                       </button>
                     </>
