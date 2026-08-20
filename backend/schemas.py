@@ -62,6 +62,18 @@ class EditEntryRequest(BaseModel):
     text: str
 
 
+class StartInterviewRequest(BaseModel):
+    machine_id: str
+    language_code: str = "en-IN"
+    # language_code is the worker's preferred spoken language, picked
+    # before the interview starts (unlike Add Tip, where it's detected
+    # from the first recording) - since the opening question itself
+    # needs to be spoken in some language before we've heard the worker
+    # say anything. Sarvam STT may still detect a different language
+    # from their actual answers, in which case later turns follow that
+    # instead - see routers/interview.py.
+
+
 class CreateTicketRequest(BaseModel):
     title: str
     description: str
