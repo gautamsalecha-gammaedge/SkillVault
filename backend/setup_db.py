@@ -13,4 +13,4 @@ from db import engine, Base
 import models  # noqa: F401 - this import is needed so Base knows about the table definitions
 
 Base.metadata.create_all(bind=engine)
-print("Tables created (or already existed): workers, worker_sessions, admin_sessions, worker_machines, tickets")
+print("Tables created (or already existed): workers, worker_sessions, admin_sessions, worker_machines, tickets, question_logs")

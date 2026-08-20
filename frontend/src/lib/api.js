@@ -260,6 +260,8 @@ export const Api = {
       { method: 'DELETE', auth: 'admin' }
     ),
 
+  analytics: () => apiFetch('/admin/analytics', { auth: 'admin' }),
+
   /* ---------------- Ask / Knowledge / Voice ----------------
      NOTE: /ask currently returns { answer, sources_used } where
      sources_used is a count, NOT structured source data. The

@@ -23,8 +23,9 @@ export function WorkerSessionProvider({ children }) {
   // ---- Hands-free tab ----
   const [hfMachine, setHfMachine] = useState('');
   const [hfBusy, setHfBusy] = useState(false); // true while a question is being answered, regardless of which tab is visible
-  const [hfLastQuestion, setHfLastQuestion] = useState('');
-  const [hfLastAnswer, setHfLastAnswer] = useState('');
+  // Full conversation transcript, not just the last turn — each entry:
+  // { id, question, answer, sourcesUsed, spoken, status: 'pending'|'answered'|'error', errorMessage }
+  const [hfTranscript, setHfTranscript] = useState([]);
 
   const askValue = {
     askMachine, setAskMachine, askQuestion, setAskQuestion,
@@ -32,7 +33,7 @@ export function WorkerSessionProvider({ children }) {
   };
   const hfValue = {
     hfMachine, setHfMachine, hfBusy, setHfBusy,
-    hfLastQuestion, setHfLastQuestion, hfLastAnswer, setHfLastAnswer,
+    hfTranscript, setHfTranscript,
   };
 
   return (

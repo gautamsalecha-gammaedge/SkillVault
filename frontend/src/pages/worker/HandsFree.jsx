@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Waves, Square, Volume2 } from 'lucide-react';
+import { Mic, Waves, Square, Volume2, VolumeX, AlertTriangle, X } from 'lucide-react';
 import MachineSelect from '../../components/MachineSelect';
 import { Api } from '../../lib/api';
 import { useHandsFreeVoice } from '../../lib/useHandsFreeVoice';
@@ -20,8 +20,8 @@ function savePrefs(p) {
 }
 
 const STATE = {
-  OFF: 'off',           // session not started yet — needs a tap to grant mic access
-  IDLE: 'idle',          // session open, nothing happening (PTT mode between turns)
+  OFF: 'off',
+  IDLE: 'idle',
   LISTENING: 'listening',
   TRANSCRIBING: 'transcribing',
   THINKING: 'thinking',
@@ -30,9 +30,12 @@ const STATE = {
 
 const DEFAULT_LANG = 'en-IN';
 
-// Two short beeps via Web Audio oscillator — no audio asset needed, and
-// they give the worker a clear non-visual cue for "go ahead" / "got it",
-// since they likely aren't looking at the screen.
+function makeId() {
+  return (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `t${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function beep(freq, ms) {
   try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -51,40 +54,23 @@ function beep(freq, ms) {
   } catch { /* non-critical */ }
 }
 
-/**
- * Real hands-free loop, built on useHandsFreeVoice (see that file for the
- * VAD/barge-in mechanics). Once the worker taps the mic once to open the
- * session:
- *
- *   listening (auto-stops on ~1.1s silence) -> transcribing -> thinking
- *   -> speaking the answer aloud -> back to listening
- *
- * ...with zero further taps in "Auto" activation mode. If the worker talks
- * over a playing answer, it barges in: playback cuts and their new
- * question starts recording immediately. "Push-to-talk" activation keeps
- * the older tap-to-start/tap-to-stop behavior for noisy environments where
- * amplitude-based silence detection isn't reliable (e.g. right next to a
- * running machine).
- *
- * The mic stream itself can't survive navigating to another tab (browser
- * tears it down with the component), so leaving Hands-free always ends
- * the session — but the last question/answer live in
- * WorkerSessionProvider so they're still there if the worker comes back.
- */
 export default function HandsFree() {
   const { t } = useI18n();
   const [prefs, setPrefs] = useState(loadPrefs);
   const [machines, setMachines] = useState([]);
   const {
     hfMachine: machine, setHfMachine: setMachine,
-    hfBusy: busy, setHfBusy: setBusy,
-    hfLastQuestion: lastQuestion, setHfLastQuestion: setLastQuestion,
-    hfLastAnswer: lastAnswer, setHfLastAnswer: setLastAnswer,
+    setHfBusy: setBusy,
+    hfTranscript: transcript, setHfTranscript: setTranscript,
   } = useHandsFreeSession();
 
-  const [state, setState] = useState(busy ? STATE.THINKING : STATE.OFF);
+  const [state, setState] = useState(STATE.OFF);
   const [detectedLang, setDetectedLang] = useState(DEFAULT_LANG);
+  const [bannerError, setBannerError] = useState(null);
+  const [liveText, setLiveText] = useState('');
   const audioRef = useRef(null);
+  const transcriptEndRef = useRef(null);
+  const recognitionRef = useRef(null);
   const { push } = useToast();
   const voice = useHandsFreeVoice();
   const stateRef = useRef(state);
@@ -100,15 +86,23 @@ export default function HandsFree() {
         setMachines(res.machine_ids || []);
         if (res.machine_ids?.length && !machine) setMachine(res.machine_ids[0]);
       })
-      .catch((err) => push(err.message, 'error'));
+      .catch((err) => {
+        console.error('[HandsFree] failed to load machines', err);
+        push(err.message, 'error');
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => () => {
     audioRef.current?.pause();
+    stopLiveCaption();
     voice.closeSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [transcript.length, liveText]);
 
   function update(patch) {
     const next = { ...prefs, ...patch };
@@ -116,12 +110,59 @@ export default function HandsFree() {
     savePrefs(next);
   }
 
+  function updateEntry(id, patch) {
+    setTranscript((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  }
+
+  function startLiveCaption() {
+    setLiveText('');
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = detectedLang || 'en-IN';
+      rec.onresult = (e) => {
+        let text = '';
+        for (let i = 0; i < e.results.length; i++) {
+          text += e.results[i][0].transcript;
+        }
+        setLiveText(text.trim());
+      };
+      rec.onerror = () => {};
+      rec.onend = () => {
+        // Keep going only while still listening
+        if (stateRef.current === STATE.LISTENING && recognitionRef.current === rec) {
+          try { rec.start(); } catch { /* already stopped */ }
+        }
+      };
+      rec.start();
+      recognitionRef.current = rec;
+    } catch {
+      /* optional feature */
+    }
+  }
+
+  function stopLiveCaption() {
+    try {
+      recognitionRef.current?.stop();
+    } catch { /* noop */ }
+    recognitionRef.current = null;
+  }
+
   async function handleEnterHandsFree() {
     if (!machine) {
       push(t('noMachineAssignedYet'), 'info');
       return;
     }
-    const ok = await voice.openSession((err) => push(err || t('micErrorHandsFree'), 'error'));
+    setBannerError(null);
+    const ok = await voice.openSession((err) => {
+      const msg = err || t('micErrorHandsFree');
+      console.error('[HandsFree] openSession failed:', err);
+      setBannerError(msg);
+      push(msg, 'error');
+    });
     if (!ok) return;
     if (prefsRef.current.activation === 'auto') {
       startListeningTurn();
@@ -132,6 +173,8 @@ export default function HandsFree() {
 
   function handleExitHandsFree() {
     audioRef.current?.pause();
+    stopLiveCaption();
+    setLiveText('');
     voice.cancelTurn();
     voice.clearBargeInWatch();
     voice.closeSession();
@@ -141,21 +184,30 @@ export default function HandsFree() {
   function startListeningTurn() {
     if (!machineRef.current) return;
     setState(STATE.LISTENING);
+    setLiveText('');
     beep(760, 90);
+    startLiveCaption();
     voice.listenOnce(
-      ({ transcript, language_code }) => {
+      ({ transcript: text, language_code }) => {
+        stopLiveCaption();
+        setLiveText('');
         if (language_code) setDetectedLang(language_code);
         setState(STATE.THINKING);
-        handleQuestion(transcript, language_code || detectedLang);
+        handleQuestion(text, language_code || detectedLang);
       },
       (err) => {
+        stopLiveCaption();
+        setLiveText('');
         if (err === '__EMPTY__') {
-          // Heard silence/noise, nothing worth sending — just try again
-          // rather than erroring out, since a worker mid-task may pause
-          // before speaking.
-          if (stateRef.current === STATE.LISTENING) startListeningTurn();
+          if (
+            stateRef.current === STATE.LISTENING ||
+            stateRef.current === STATE.TRANSCRIBING
+          ) {
+            startListeningTurn();
+          }
           return;
         }
+        console.error('[HandsFree] listenOnce failed:', err);
         setState(STATE.IDLE);
         push(err || t('micErrorHandsFree'), 'error');
       },
@@ -163,40 +215,56 @@ export default function HandsFree() {
   }
 
   function stopListeningTurn() {
-    // Manual "done talking" for PTT mode — VAD normally handles this itself.
     setState(STATE.TRANSCRIBING);
+    stopLiveCaption();
     voice.stopListening();
   }
 
-  async function handleQuestion(transcript, lang) {
-    setLastQuestion(transcript);
-    setLastAnswer('');
+  async function handleQuestion(text, lang) {
+    const id = makeId();
+    setTranscript((prev) => [
+      ...prev,
+      { id, question: text, answer: null, sourcesUsed: 0, status: 'pending' },
+    ]);
     setBusy(true);
     try {
-      const res = await Api.ask(transcript, machineRef.current);
-      setLastAnswer(res.answer);
+      const res = await Api.ask(text, machineRef.current);
+      updateEntry(id, {
+        answer: res.answer,
+        sourcesUsed: res.sources_used,
+        status: 'answered',
+      });
       setBusy(false);
       if (prefsRef.current.spoken) {
-        await speak(res.answer, lang);
+        await speak(res.answer, lang, id);
       } else {
         advanceAfterTurn();
       }
     } catch (err) {
-      push(err.message, 'error');
+      console.error('[HandsFree] /ask failed:', err);
+      updateEntry(id, {
+        status: 'error',
+        errorMessage: err.message || t('answerErrorHandsFree'),
+      });
+      push(err.message || t('answerErrorHandsFree'), 'error');
       setBusy(false);
       advanceAfterTurn();
     }
   }
 
   function advanceAfterTurn() {
-    if (prefsRef.current.continuous && prefsRef.current.activation === 'auto' && voice.sessionOpen) {
+    if (
+      prefsRef.current.continuous &&
+      prefsRef.current.activation === 'auto' &&
+      voice.sessionOpen
+    ) {
       startListeningTurn();
     } else {
       setState(STATE.IDLE);
     }
   }
 
-  async function speak(text, lang) {
+  async function speak(text, lang, entryId) {
     setState(STATE.SPEAKING);
     try {
       const { blob } = await Api.speak(text, lang || detectedLang);
@@ -204,10 +272,6 @@ export default function HandsFree() {
       const audio = new Audio(url);
       audioRef.current = audio;
 
-      // Barge-in: while this plays, keep listening on the still-open mic
-      // session. If the worker starts talking, cut playback immediately
-      // and roll straight into a new recording — no waiting for the
-      // answer to finish.
       if (prefsRef.current.activation === 'auto') {
         voice.watchForBargeIn(() => {
           audio.pause();
@@ -222,12 +286,16 @@ export default function HandsFree() {
         advanceAfterTurn();
       };
       audio.onerror = () => {
+        console.error('[HandsFree] audio playback error for entry', entryId);
         URL.revokeObjectURL(url);
         voice.clearBargeInWatch();
+        updateEntry(entryId, { audioFailed: true });
         advanceAfterTurn();
       };
       await audio.play();
     } catch (err) {
+      console.error('[HandsFree] speak() failed:', err);
+      updateEntry(entryId, { audioFailed: true });
       push(t('spokenAnswerError'), 'error');
       advanceAfterTurn();
     }
@@ -240,7 +308,7 @@ export default function HandsFree() {
     }
     if (state === STATE.LISTENING) {
       if (prefs.activation === 'ptt') stopListeningTurn();
-      return; // in auto mode, VAD ends it — tapping mid-listen does nothing surprising
+      return;
     }
     if (state === STATE.SPEAKING) {
       audioRef.current?.pause();
@@ -253,95 +321,272 @@ export default function HandsFree() {
   }
 
   const statusLabel = {
-    [STATE.OFF]: t('statusTapToStart') || 'Tap to start hands-free',
-    [STATE.IDLE]: prefs.activation === 'auto' ? (t('statusIdleAuto') || 'Ready — tap to ask') : t('statusIdlePtt'),
-    [STATE.LISTENING]: prefs.activation === 'auto' ? (t('statusListeningAuto') || "Listening… I'll know when you're done") : t('statusListening'),
-    [STATE.TRANSCRIBING]: t('transcribing') || t('thinking'),
+    [STATE.OFF]: t('statusTapToStart'),
+    [STATE.IDLE]: prefs.activation === 'auto' ? t('statusIdleAuto') : t('statusIdlePtt'),
+    [STATE.LISTENING]: prefs.activation === 'auto' ? t('statusListeningAuto') : t('statusListening'),
+    [STATE.TRANSCRIBING]: t('transcribing'),
     [STATE.THINKING]: t('thinking'),
-    [STATE.SPEAKING]: prefs.activation === 'auto' ? (t('statusSpeakingBargeIn') || 'Speaking… talk anytime to interrupt') : t('statusSpeaking'),
+    [STATE.SPEAKING]: prefs.activation === 'auto' ? t('statusSpeakingBargeIn') : t('statusSpeaking'),
   }[state];
 
   const isBusyState = state === STATE.THINKING || state === STATE.TRANSCRIBING;
   const ringLevel = state === STATE.LISTENING ? Math.max(8, voice.micLevel) : 0;
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>
-      <div style={{ maxWidth: 360, width: '100%' }}>
-        <p style={{ fontFamily: 'var(--sv-font-display)', fontWeight: 600, fontSize: 20, color: 'var(--sv-ink)', textAlign: 'center' }}>
+    <div
+      style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        padding: '20px 16px',
+        overflowY: 'auto',
+        background: 'var(--sv-bg)',
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 440,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
+        <p
+          style={{
+            fontFamily: 'var(--sv-font-display)',
+            fontWeight: 600,
+            fontSize: 22,
+            color: 'var(--sv-ink)',
+            textAlign: 'center',
+            margin: 0,
+          }}
+        >
           {t('handsFreeTitle')}
         </p>
-        <p style={{ fontSize: 13, color: 'var(--sv-muted)', textAlign: 'center', marginBottom: 16 }}>
+        <p
+          style={{
+            fontSize: 13,
+            color: 'var(--sv-muted)',
+            textAlign: 'center',
+            margin: '6px 0 16px',
+          }}
+        >
           {t('handsFreeSubtitle')}
         </p>
 
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
           {machines.length > 0 ? (
-            <MachineSelect value={machine} onChange={setMachine} machines={machines} disabled={state !== STATE.OFF} />
+            <MachineSelect
+              value={machine}
+              onChange={setMachine}
+              machines={machines}
+              disabled={state !== STATE.OFF}
+            />
           ) : (
-            <span style={{ fontSize: 13, color: 'var(--sv-muted)' }}>{t('noMachinesAssigned')}</span>
+            <span style={{ fontSize: 13, color: 'var(--sv-muted)' }}>
+              {t('noMachinesAssigned')}
+            </span>
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 24 }}>
-          <div style={{ position: 'relative', width: 96, height: 96, marginBottom: 12 }}>
-            {/* Live level ring while actively listening — real amplitude feedback instead of a static pulse */}
+        {bannerError && (
+          <div
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              padding: '10px 12px',
+              marginBottom: 14,
+              borderRadius: 12,
+              background: 'var(--sv-danger-soft, #fee2e2)',
+              border: '1px solid var(--sv-danger, #ef4444)',
+            }}
+          >
+            <AlertTriangle size={16} color="var(--sv-danger, #ef4444)" style={{ flexShrink: 0, marginTop: 1 }} />
+            <p style={{ fontSize: 13, color: 'var(--sv-ink)', flex: 1, margin: 0 }}>{bannerError}</p>
+            <button
+              onClick={() => setBannerError(null)}
+              aria-label={t('close')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sv-muted)', flexShrink: 0 }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {/* Mic card */}
+        <div
+          className="sv-card"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: '20px 16px',
+            marginBottom: 16,
+            borderRadius: 16,
+          }}
+        >
+          <div style={{ position: 'relative', width: 104, height: 104, marginBottom: 12 }}>
             {state === STATE.LISTENING && (
-              <div style={{
-                position: 'absolute', inset: -Math.round(ringLevel * 0.5),
-                borderRadius: '50%', border: '3px solid var(--sv-brass-soft)',
-                opacity: 0.6, transition: 'inset 0.08s linear',
-              }} />
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: -Math.round(ringLevel * 0.45),
+                  borderRadius: '50%',
+                  border: '3px solid var(--sv-brass-soft, #d4a574)',
+                  opacity: 0.55,
+                  transition: 'inset 0.08s linear',
+                  pointerEvents: 'none',
+                }}
+              />
             )}
             <button
               onClick={handleMicTap}
               disabled={isBusyState}
               style={{
-                position: 'relative', width: 96, height: 96, borderRadius: '50%',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: state === STATE.SPEAKING ? 'var(--sv-teal)' : 'var(--sv-brass)',
-                boxShadow: state === STATE.LISTENING ? '0 0 0 8px var(--sv-brass-soft)' : '0 0 0 8px transparent',
-                transition: 'box-shadow 0.2s ease, background 0.2s ease',
+                position: 'relative',
+                width: 104,
+                height: 104,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background:
+                  state === STATE.SPEAKING
+                    ? 'var(--sv-teal, #0d9488)'
+                    : state === STATE.LISTENING
+                      ? 'var(--sv-brass, #b8860b)'
+                      : 'var(--sv-brass, #b8860b)',
+                boxShadow:
+                  state === STATE.LISTENING
+                    ? '0 0 0 10px var(--sv-brass-soft, rgba(184,134,11,0.25))'
+                    : '0 4px 14px rgba(0,0,0,0.15)',
+                transition: 'box-shadow 0.2s ease, background 0.2s ease, transform 0.1s ease',
                 cursor: isBusyState ? 'not-allowed' : 'pointer',
+                border: 'none',
+                opacity: isBusyState ? 0.7 : 1,
               }}
               aria-label={state === STATE.LISTENING ? t('stopListeningAria') : t('startListeningAria')}
             >
-              {state === STATE.SPEAKING ? <Volume2 size={36} color="#fff" /> : <Mic size={36} color="#fff" />}
+              {state === STATE.SPEAKING ? (
+                <Volume2 size={38} color="#fff" />
+              ) : (
+                <Mic size={38} color="#fff" />
+              )}
             </button>
           </div>
 
-          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, color: 'var(--sv-brass)', textAlign: 'center' }}>
-            <Waves size={14} />
+          <p
+            aria-live="polite"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 14,
+              fontWeight: 600,
+              color: 'var(--sv-brass, #b8860b)',
+              textAlign: 'center',
+              margin: 0,
+            }}
+          >
+            <Waves size={15} />
             {statusLabel}
           </p>
+
+          {/* Live caption while speaking */}
+          {state === STATE.LISTENING && (
+            <div
+              style={{
+                marginTop: 14,
+                width: '100%',
+                minHeight: 52,
+                padding: '12px 14px',
+                borderRadius: 12,
+                background: 'var(--sv-bg, var(--sv-surface))',
+                border: '1px dashed var(--sv-border, #ccc)',
+                fontSize: 15,
+                lineHeight: 1.4,
+                color: liveText ? 'var(--sv-ink)' : 'var(--sv-muted)',
+                textAlign: 'center',
+              }}
+            >
+              {liveText || 'Speak now… your words will appear here'}
+            </div>
+          )}
 
           {state === STATE.LISTENING && prefs.activation === 'ptt' && (
             <button
               onClick={stopListeningTurn}
               className="sv-btn sv-btn--outline"
-              style={{ marginTop: 10, fontSize: 12, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
+              style={{ marginTop: 12, fontSize: 13, padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}
             >
-              <Square size={12} /> {t('tapAgainToStop') || "I'm done"}
+              <Square size={12} /> {t('tapAgainToStop')}
             </button>
           )}
 
           {state !== STATE.OFF && (
             <button
               onClick={handleExitHandsFree}
-              style={{ marginTop: 14, fontSize: 12, color: 'var(--sv-muted)', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer' }}
+              style={{
+                marginTop: 14,
+                fontSize: 12,
+                color: 'var(--sv-muted)',
+                background: 'none',
+                border: 'none',
+                textDecoration: 'underline',
+                cursor: 'pointer',
+              }}
             >
-              {t('exitHandsFree') || 'Exit hands-free'}
+              {t('exitHandsFree')}
             </button>
           )}
         </div>
 
-        {(lastQuestion || lastAnswer) && (
-          <div className="sv-card" style={{ marginBottom: 24 }}>
-            {lastQuestion && <p style={{ fontSize: 13, color: 'var(--sv-muted)', marginBottom: 6 }}>{t('youAsked', { question: lastQuestion })}</p>}
-            {lastAnswer && <p style={{ fontSize: 14, color: 'var(--sv-ink)' }}>{lastAnswer}</p>}
-          </div>
-        )}
+        {/* Transcript */}
+        <div
+          style={{
+            flex: '1 1 auto',
+            minHeight: 140,
+            maxHeight: 340,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            marginBottom: 16,
+            padding: transcript.length ? '4px 2px' : 0,
+          }}
+        >
+          {transcript.length === 0 ? (
+            <p
+              style={{
+                fontSize: 13,
+                color: 'var(--sv-muted)',
+                textAlign: 'center',
+                marginTop: 8,
+              }}
+            >
+              {t('transcriptEmptyHint')}
+            </p>
+          ) : (
+            transcript.map((entry) => (
+              <TranscriptTurn
+                key={entry.id}
+                entry={entry}
+                t={t}
+                onRetryListen={startListeningTurn}
+                state={state}
+              />
+            ))
+          )}
+          <div ref={transcriptEndRef} />
+        </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Settings */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <ToggleRow
             title={t('continuousListeningTitle')}
             note={t('continuousListeningNote')}
@@ -354,10 +599,12 @@ export default function HandsFree() {
             value={prefs.spoken}
             onChange={(v) => update({ spoken: v })}
           />
-          <div className="sv-card">
-            <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--sv-ink)', marginBottom: 2 }}>{t('activationTitle') || 'Listening mode'}</p>
-            <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginBottom: 8 }}>
-              {t('activationNote') || 'Auto stops recording itself when you stop talking. Push-to-talk needs a tap to end each turn.'}
+          <div className="sv-card" style={{ borderRadius: 14, padding: 14 }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--sv-ink)', margin: '0 0 2px' }}>
+              {t('activationTitle')}
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--sv-muted)', margin: '0 0 10px' }}>
+              {t('activationNote')}
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               {['auto', 'ptt'].map((mode) => (
@@ -366,14 +613,28 @@ export default function HandsFree() {
                   disabled={state !== STATE.OFF && state !== STATE.IDLE}
                   onClick={() => update({ activation: mode })}
                   style={{
-                    fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 'var(--sv-radius-full)',
-                    background: prefs.activation === mode ? 'var(--sv-activation-bg)' : 'transparent',
-                    color: prefs.activation === mode ? 'var(--sv-activation-text)' : 'var(--sv-muted)',
-                    border: `1px solid ${prefs.activation === mode ? 'var(--sv-activation-bg)' : 'var(--sv-activation-border)'}`,
-                    cursor: (state !== STATE.OFF && state !== STATE.IDLE) ? 'not-allowed' : 'pointer',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: '8px 14px',
+                    borderRadius: 999,
+                    background:
+                      prefs.activation === mode
+                        ? 'var(--sv-activation-bg, var(--sv-brass, #b8860b))'
+                        : 'transparent',
+                    color:
+                      prefs.activation === mode
+                        ? 'var(--sv-activation-text, #fff)'
+                        : 'var(--sv-muted)',
+                    border: `1px solid ${
+                      prefs.activation === mode
+                        ? 'var(--sv-activation-bg, var(--sv-brass, #b8860b))'
+                        : 'var(--sv-border, #ccc)'
+                    }`,
+                    cursor:
+                      state !== STATE.OFF && state !== STATE.IDLE ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {mode === 'auto' ? (t('activationAuto') || 'Auto (hands-free)') : t('activationPtt')}
+                  {mode === 'auto' ? t('activationAuto') : t('activationPtt')}
                 </button>
               ))}
             </div>
@@ -384,26 +645,138 @@ export default function HandsFree() {
   );
 }
 
+function TranscriptTurn({ entry, t, onRetryListen, state }) {
+  const isPending = entry.status === 'pending';
+  const isError = entry.status === 'error';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div
+        style={{
+          alignSelf: 'flex-end',
+          maxWidth: '88%',
+          background: 'var(--sv-question-bg, var(--sv-brass, #b8860b))',
+          color: 'var(--sv-question-text, #fff)',
+          borderRadius: '14px 14px 4px 14px',
+          padding: '10px 14px',
+          fontSize: 14,
+          lineHeight: 1.4,
+        }}
+      >
+        {entry.question}
+      </div>
+      {isPending && (
+        <div style={{ alignSelf: 'flex-start', fontSize: 13, color: 'var(--sv-muted)', padding: '4px 6px' }}>
+          {t('thinking')}
+        </div>
+      )}
+      {isError && (
+        <div
+          style={{
+            alignSelf: 'flex-start',
+            maxWidth: '92%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background: 'var(--sv-danger-soft, #fee2e2)',
+            border: '1px solid var(--sv-danger, #ef4444)',
+            borderRadius: 12,
+            padding: '10px 12px',
+          }}
+        >
+          <AlertTriangle size={14} color="var(--sv-danger, #ef4444)" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 13, color: 'var(--sv-ink)', flex: 1 }}>
+            {entry.errorMessage || t('answerErrorHandsFree')}
+          </span>
+          {(state === 'idle' || state === 'off') && (
+            <button
+              onClick={onRetryListen}
+              className="sv-btn sv-btn--outline"
+              style={{ fontSize: 11, padding: '4px 10px', flexShrink: 0 }}
+            >
+              {t('retryTurn')}
+            </button>
+          )}
+        </div>
+      )}
+      {entry.status === 'answered' && (
+        <div
+          style={{
+            alignSelf: 'flex-start',
+            maxWidth: '92%',
+            background: 'var(--sv-surface, var(--sv-card, #fff))',
+            border: '1px solid var(--sv-border, #e5e5e5)',
+            borderRadius: '14px 14px 14px 4px',
+            padding: '10px 14px',
+          }}
+        >
+          <p style={{ fontSize: 14, color: 'var(--sv-ink)', margin: 0, lineHeight: 1.45 }}>
+            {entry.answer}
+          </p>
+          {entry.audioFailed && (
+            <p
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11,
+                color: 'var(--sv-muted)',
+                margin: '8px 0 0',
+              }}
+            >
+              <VolumeX size={12} /> {t('audioUnavailable')}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToggleRow({ title, note, value, onChange }) {
   return (
-    <div className="sv-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <div>
-        <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--sv-ink)' }}>{title}</p>
-        <p style={{ fontSize: 12, color: 'var(--sv-muted)' }}>{note}</p>
+    <div
+      className="sv-card"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        borderRadius: 14,
+        padding: 14,
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--sv-ink)', margin: 0 }}>{title}</p>
+        <p style={{ fontSize: 12, color: 'var(--sv-muted)', margin: '2px 0 0' }}>{note}</p>
       </div>
       <button
         onClick={() => onChange(!value)}
         aria-pressed={value}
         aria-label={title}
         style={{
-          width: 40, height: 24, borderRadius: 'var(--sv-radius-full)', position: 'relative',
-          background: value ? 'var(--sv-teal)' : 'var(--sv-border)', flexShrink: 0,
+          width: 44,
+          height: 26,
+          borderRadius: 999,
+          position: 'relative',
+          background: value ? 'var(--sv-teal, #0d9488)' : 'var(--sv-border, #ccc)',
+          flexShrink: 0,
+          border: 'none',
+          cursor: 'pointer',
         }}
       >
-        <div style={{
-          width: 18, height: 18, borderRadius: '50%', background: '#fff', position: 'absolute',
-          top: 3, left: value ? 20 : 3, transition: 'left 0.15s ease',
-        }} />
+        <div
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: '50%',
+            background: '#fff',
+            position: 'absolute',
+            top: 3,
+            left: value ? 21 : 3,
+            transition: 'left 0.15s ease',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+          }}
+        />
       </button>
     </div>
   );

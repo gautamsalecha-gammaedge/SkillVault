@@ -66,3 +66,13 @@ class Ticket(Base):
     status = Column(String, nullable=False, default="Open")      # Open / In Progress / Resolved / Closed
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class QuestionLog(Base):
+    """One row per worker question — powers analytics (questions per machine)."""
+    __tablename__ = "question_logs"
+
+    id = Column(String, primary_key=True)  # uuid
+    worker_id = Column(String, ForeignKey("workers.worker_id"), nullable=False)
+    machine_id = Column(String, nullable=False)
+    sources_used = Column(String, nullable=True)  # store as string for simplicity
+    created_at = Column(DateTime, default=datetime.utcnow)

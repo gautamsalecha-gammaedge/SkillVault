@@ -2,11 +2,10 @@
 routers/ask.py
 
 POST /ask - worker asks a question, gets an answer grounded in the
-knowledge base (manual chunks + approved worker tips) for one machine.
-
-Now also returns video_url if the best matching tip has a video.
+knowledge base. Also logs the question for analytics.
 """
 
+import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -17,7 +16,7 @@ from rag.prompts import ANSWER_PROMPT
 from rag.llm_provider import generate_text
 from auth.worker_auth import require_worker
 from db import get_db
-from models import WorkerMachine
+from models import WorkerMachine, QuestionLog
 
 router = APIRouter()
 
@@ -28,7 +27,6 @@ def ask(
     worker: dict = Depends(require_worker),
     db: Session = Depends(get_db),
 ):
-    # 1. Check if this worker is assigned to the requested machine
     assignment = (
         db.query(WorkerMachine)
         .filter(
@@ -41,13 +39,11 @@ def ask(
     if not assignment:
         raise HTTPException(
             status_code=403,
-            detail="You are not assigned to this machine. Contact admin."
+            detail="You are not assigned to this machine. Contact admin.",
         )
 
-    # 2. Embed the question
     question_embedding = embed_text(req.question)
 
-    # 3. Retrieve relevant approved chunks for this machine only
     results = collection.query(
         query_embeddings=[question_embedding],
         n_results=4,
@@ -63,6 +59,8 @@ def ask(
     retrieved_metadatas = results["metadatas"][0] if results["metadatas"] else []
 
     if not retrieved_chunks:
+        # Still log the attempt so analytics sees "questions with no knowledge"
+        _log_question(db, worker["worker_id"], req.machine_id, 0)
         return {
             "answer": "I don't have any knowledge saved for this machine yet.",
             "sources_used": 0,
@@ -70,20 +68,35 @@ def ask(
         }
 
     context = "\n\n".join(retrieved_chunks)
-
-    # 4. Generate answer
     prompt = ANSWER_PROMPT.format(context=context, question=req.question)
     answer_text = generate_text(prompt)
 
-    # 5. Find the first video_url from the retrieved tips (if any)
     video_url = None
     for meta in retrieved_metadatas:
         if meta.get("video_url"):
             video_url = meta["video_url"]
             break
 
+    sources_used = len(retrieved_chunks)
+    _log_question(db, worker["worker_id"], req.machine_id, sources_used)
+
     return {
         "answer": answer_text,
-        "sources_used": len(retrieved_chunks),
+        "sources_used": sources_used,
         "video_url": video_url,
     }
+
+
+def _log_question(db: Session, worker_id: str, machine_id: str, sources_used: int):
+    try:
+        row = QuestionLog(
+            id=uuid.uuid4().hex,
+            worker_id=worker_id,
+            machine_id=machine_id,
+            sources_used=str(sources_used),
+        )
+        db.add(row)
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Never break /ask because analytics logging failed
