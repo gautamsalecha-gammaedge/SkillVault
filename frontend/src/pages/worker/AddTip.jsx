@@ -123,11 +123,35 @@ function VideoAttach({ t, videoFile, onPick, onClear, disabled }) {
     );
   }
 
-  if (videoFile) {
+    if (videoFile) {
     return (
       <div style={{ marginBottom: 16 }}>
         <div style={{ position: 'relative', borderRadius: 'var(--sv-radius-md)', overflow: 'hidden', background: '#000' }}>
-          <video src={previewUrl} controls style={{ width: '100%', maxHeight: 220, display: 'block' }} />
+          <video
+            src={previewUrl}
+            controls
+            preload="metadata"
+            style={{ width: '100%', maxHeight: 220, display: 'block' }}
+            // Chrome's MediaRecorder writes webm without a duration in the
+            // header (it doesn't know final length while live-recording),
+            // so the freshly-recorded blob loads as a black frame stuck at
+            // 0:00 that won't seek — even though the video data is fine.
+            // Forcing a seek past the end and back recalculates the real
+            // duration and unlocks the frame/seekbar. Not needed for
+            // uploaded files (those already have a proper header), only
+            // matters right after a live recording.
+            onLoadedMetadata={(e) => {
+              const v = e.currentTarget;
+              if (v.duration === Infinity || Number.isNaN(v.duration)) {
+                const fix = () => {
+                  v.currentTime = 0;
+                  v.removeEventListener('timeupdate', fix);
+                };
+                v.addEventListener('timeupdate', fix);
+                v.currentTime = 1e101;
+              }
+            }}
+          />
           <button
             type="button"
             onClick={onClear}
@@ -149,25 +173,51 @@ function VideoAttach({ t, videoFile, onPick, onClear, disabled }) {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+    <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
       <button
         type="button"
-        className="sv-btn sv-btn--outline"
-        style={{ flex: 1, justifyContent: 'center' }}
         disabled={disabled}
         onClick={handleStartRecording}
+        style={{
+          flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+          padding: '14px 10px', borderRadius: 'var(--sv-radius-md)', cursor: disabled ? 'not-allowed' : 'pointer',
+          border: '1.5px solid var(--sv-danger, #de6464)', background: 'rgba(222,100,100,0.06)',
+          color: 'var(--sv-danger, #de6464)', transition: 'transform 0.12s ease, background 0.15s ease',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(222,100,100,0.14)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(222,100,100,0.06)'; e.currentTarget.style.transform = 'none'; }}
       >
-        <Video size={15} /> {t('recordVideoBtn') || 'Record a video'}
+        <span style={{
+          width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--sv-danger, #de6464)', color: '#fff',
+        }}>
+          <Video size={17} />
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{t('recordVideoBtn') || 'Record a video'}</span>
       </button>
+
       <button
         type="button"
-        className="sv-btn sv-btn--outline"
-        style={{ flex: 1, justifyContent: 'center' }}
         disabled={disabled}
         onClick={() => fileInputRef.current?.click()}
+        style={{
+          flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+          padding: '14px 10px', borderRadius: 'var(--sv-radius-md)', cursor: disabled ? 'not-allowed' : 'pointer',
+          border: '1.5px solid var(--sv-border)', background: 'var(--sv-brass-soft)',
+          color: 'var(--sv-brass)', transition: 'transform 0.12s ease, background 0.15s ease',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}
       >
-        <Upload size={15} /> {t('uploadVideoBtn') || 'Upload a video'}
+        <span style={{
+          width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--sv-brass)', color: '#fff',
+        }}>
+          <Upload size={17} />
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{t('uploadVideoBtn') || 'Upload a video'}</span>
       </button>
+
       <input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo" hidden onChange={handleFilePick} />
     </div>
   );

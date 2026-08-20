@@ -7,13 +7,14 @@ import { Cog, ChevronDown } from 'lucide-react';
  * `machines` should come from /worker/my-machines — the preview
  * hardcoded a demo list, but the real list is per-worker assignment.
  */
-export default function MachineSelect({ value, onChange, machines = [] }) {
+export default function MachineSelect({ value, onChange, machines = [], disabled = false }) {
   return (
-    <div className="sv-machine-select">
+    <div className="sv-machine-select" style={disabled ? { opacity: 0.6 } : undefined}>
       <select
         className="sv-machine-select__control"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       >
         {machines.map((m) => (
           <option key={m} value={m}>{m}</option>

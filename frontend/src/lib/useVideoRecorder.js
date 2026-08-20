@@ -16,6 +16,7 @@ export function useVideoRecorder() {
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
+  const mimeTypeRef = useRef('video/webm');
 
   const start = useCallback(async (onError) => {
     try {
@@ -26,11 +27,15 @@ export function useVideoRecorder() {
       streamRef.current = mediaStream;
       setStream(mediaStream);
 
-      const recorder = new MediaRecorder(mediaStream, {
-        mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-          ? 'video/webm;codecs=vp8,opus'
-          : 'video/webm',
-      });
+      // Safari (iOS/macOS) can record but cannot *play back* video/webm in
+      // a <video> tag, so the in-app preview after stopping would appear
+      // blank there. Prefer mp4 when the browser supports recording it;
+      // fall back through webm variants for Chrome/Firefox/Android.
+      const mimeType = ['video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm'].find((type) =>
+        MediaRecorder.isTypeSupported(type),
+      ) || '';
+      mimeTypeRef.current = mimeType;
+      const recorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -65,8 +70,10 @@ export function useVideoRecorder() {
           resolve(null);
           return;
         }
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-        const file = new File([blob], `tip-video-${Date.now()}.webm`, { type: 'video/webm' });
+        const type = mimeTypeRef.current || 'video/webm';
+        const ext = type.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(chunksRef.current, { type });
+        const file = new File([blob], `tip-video-${Date.now()}.${ext}`, { type });
         resolve(file);
       };
       recorder.stop();

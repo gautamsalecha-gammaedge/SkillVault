@@ -142,10 +142,10 @@ function uploadManualXhr(machine_id, file, onProgress) {
  * shape to uploadManualXhr but simpler (no progress tracking needed
  * for a few seconds of audio, and no admin auth - worker auth instead).
  */
-function transcribeXhr(audioBlob) {
+function transcribeXhr(audioBlob, filename = 'audio.webm') {
   return new Promise((resolve, reject) => {
     const form = new FormData();
-    form.append('file', audioBlob, 'audio.webm');
+    form.append('file', audioBlob, filename);
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_BASE}/transcribe`);
@@ -295,7 +295,7 @@ export const Api = {
      spoken language in one call. Returns { transcript, language_code }.
      No language is ever passed in here - that's the whole point,
      Sarvam figures it out from the audio itself. */
-  transcribe: (audioBlob) => transcribeXhr(audioBlob),
+  transcribe: (audioBlob, filename) => transcribeXhr(audioBlob, filename),
 
   /* ---------------- Tickets ---------------- */
   createTicket: (data) =>

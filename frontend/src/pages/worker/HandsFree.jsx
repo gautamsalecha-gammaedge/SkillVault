@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Waves } from 'lucide-react';
+import { Mic, Waves, Square, Volume2 } from 'lucide-react';
 import MachineSelect from '../../components/MachineSelect';
 import { Api } from '../../lib/api';
-import { useVoiceRecorder } from '../../lib/useVoiceRecorder';
+import { useHandsFreeVoice } from '../../lib/useHandsFreeVoice';
 import { useToast } from '../../lib/toast';
 import { useHandsFreeSession } from '../../lib/workerSession';
 import { useI18n } from '../../lib/i18n';
@@ -10,46 +10,66 @@ import { useI18n } from '../../lib/i18n';
 const KEY = 'sv_handsfree_prefs';
 function loadPrefs() {
   try {
-    return { continuous: true, spoken: true, activation: 'wake', ...JSON.parse(localStorage.getItem(KEY) || '{}') };
+    return { continuous: true, spoken: true, activation: 'auto', ...JSON.parse(localStorage.getItem(KEY) || '{}') };
   } catch {
-    return { continuous: true, spoken: true, activation: 'wake' };
+    return { continuous: true, spoken: true, activation: 'auto' };
   }
 }
 function savePrefs(p) {
   localStorage.setItem(KEY, JSON.stringify(p));
 }
 
-const STATE = { IDLE: 'idle', LISTENING: 'listening', TRANSCRIBING: 'transcribing', THINKING: 'thinking', SPEAKING: 'speaking' };
+const STATE = {
+  OFF: 'off',           // session not started yet — needs a tap to grant mic access
+  IDLE: 'idle',          // session open, nothing happening (PTT mode between turns)
+  LISTENING: 'listening',
+  TRANSCRIBING: 'transcribing',
+  THINKING: 'thinking',
+  SPEAKING: 'speaking',
+};
 
-// Fallback for the very first question in a session, before Sarvam has
-// detected anything yet. After that, detectedLang tracks whatever the
-// worker most recently spoke - carried across turns since a worker
-// rarely switches language mid hands-free session.
 const DEFAULT_LANG = 'en-IN';
 
+// Two short beeps via Web Audio oscillator — no audio asset needed, and
+// they give the worker a clear non-visual cue for "go ahead" / "got it",
+// since they likely aren't looking at the screen.
+function beep(freq, ms) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + ms / 1000);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + ms / 1000 + 0.02);
+    osc.onended = () => ctx.close().catch(() => {});
+  } catch { /* non-critical */ }
+}
+
 /**
- * Real "wake word" detection (always-on keyword spotting for something
- * like "Hey Vault") needs a dedicated model running continuously in the
- * background — not something achievable with a record-then-send STT
- * flow. What's implemented here, honestly: tap the mic to start
- * recording, tap again to stop and send it off, get it answered and
- * (optionally) read aloud, and if "Continuous listening" is on, the mic
- * re-arms itself after the answer so you don't have to navigate back or
- * tap "start" again. "Wake word" vs "Push-to-talk" changes whether it
- * re-arms automatically or waits for your next tap to even begin -
- * neither mode removes the need to tap once to signal "I'm done
- * talking," since that's what tells the recorder to stop and send the
- * audio. True silence-triggered hands-free (no second tap at all) needs
- * a live-streaming connection with server-side voice activity detection,
- * which isn't what's wired up here.
+ * Real hands-free loop, built on useHandsFreeVoice (see that file for the
+ * VAD/barge-in mechanics). Once the worker taps the mic once to open the
+ * session:
  *
- * The live mic/audio session (recorder, WebSocket-free here, Audio
- * element) can't survive navigating to another tab — the browser tears
- * that down with the component, same as any other page. But the
- * *result* of a question asked here — busy flag, last question, last
- * answer — lives in WorkerSessionProvider (above <Outlet/>), so if you
- * switch to Ask or Settings while it's thinking, the answer still lands
- * and is there when you come back, instead of vanishing.
+ *   listening (auto-stops on ~1.1s silence) -> transcribing -> thinking
+ *   -> speaking the answer aloud -> back to listening
+ *
+ * ...with zero further taps in "Auto" activation mode. If the worker talks
+ * over a playing answer, it barges in: playback cuts and their new
+ * question starts recording immediately. "Push-to-talk" activation keeps
+ * the older tap-to-start/tap-to-stop behavior for noisy environments where
+ * amplitude-based silence detection isn't reliable (e.g. right next to a
+ * running machine).
+ *
+ * The mic stream itself can't survive navigating to another tab (browser
+ * tears it down with the component), so leaving Hands-free always ends
+ * the session — but the last question/answer live in
+ * WorkerSessionProvider so they're still there if the worker comes back.
  */
 export default function HandsFree() {
   const { t } = useI18n();
@@ -61,16 +81,18 @@ export default function HandsFree() {
     hfLastQuestion: lastQuestion, setHfLastQuestion: setLastQuestion,
     hfLastAnswer: lastAnswer, setHfLastAnswer: setLastAnswer,
   } = useHandsFreeSession();
-  // Local-only: reflects the live mic/audio session, which cannot
-  // persist across unmount. Initialized from the shared `busy` flag so
-  // a request still in flight shows "Thinking…" again on return.
-  const [state, setState] = useState(busy ? STATE.THINKING : STATE.IDLE);
-  // Sarvam-detected language from the worker's most recent recording -
-  // replaces the old getLanguage() stored-setting lookup.
+
+  const [state, setState] = useState(busy ? STATE.THINKING : STATE.OFF);
   const [detectedLang, setDetectedLang] = useState(DEFAULT_LANG);
   const audioRef = useRef(null);
   const { push } = useToast();
-  const { recording, start, stop } = useVoiceRecorder();
+  const voice = useHandsFreeVoice();
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  const machineRef = useRef(machine);
+  machineRef.current = machine;
 
   useEffect(() => {
     Api.myMachines()
@@ -82,7 +104,11 @@ export default function HandsFree() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => () => { audioRef.current?.pause(); }, []);
+  useEffect(() => () => {
+    audioRef.current?.pause();
+    voice.closeSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function update(patch) {
     const next = { ...prefs, ...patch };
@@ -90,29 +116,56 @@ export default function HandsFree() {
     savePrefs(next);
   }
 
-  function beginListening() {
+  async function handleEnterHandsFree() {
     if (!machine) {
       push(t('noMachineAssignedYet'), 'info');
       return;
     }
+    const ok = await voice.openSession((err) => push(err || t('micErrorHandsFree'), 'error'));
+    if (!ok) return;
+    if (prefsRef.current.activation === 'auto') {
+      startListeningTurn();
+    } else {
+      setState(STATE.IDLE);
+    }
+  }
+
+  function handleExitHandsFree() {
+    audioRef.current?.pause();
+    voice.cancelTurn();
+    voice.clearBargeInWatch();
+    voice.closeSession();
+    setState(STATE.OFF);
+  }
+
+  function startListeningTurn() {
+    if (!machineRef.current) return;
     setState(STATE.LISTENING);
-    start(
+    beep(760, 90);
+    voice.listenOnce(
       ({ transcript, language_code }) => {
         if (language_code) setDetectedLang(language_code);
         setState(STATE.THINKING);
         handleQuestion(transcript, language_code || detectedLang);
       },
-      (err) => { setState(STATE.IDLE); push(err || t('micErrorHandsFree'), 'error'); },
+      (err) => {
+        if (err === '__EMPTY__') {
+          // Heard silence/noise, nothing worth sending — just try again
+          // rather than erroring out, since a worker mid-task may pause
+          // before speaking.
+          if (stateRef.current === STATE.LISTENING) startListeningTurn();
+          return;
+        }
+        setState(STATE.IDLE);
+        push(err || t('micErrorHandsFree'), 'error');
+      },
     );
   }
 
-  function stopListening() {
-    // Recording actually stopping is async (MediaRecorder.onstop ->
-    // upload -> transcribe), so this just signals "I'm done talking" -
-    // the TRANSCRIBING state and the eventual THINKING/error transition
-    // happen inside beginListening()'s start() callbacks above.
+  function stopListeningTurn() {
+    // Manual "done talking" for PTT mode — VAD normally handles this itself.
     setState(STATE.TRANSCRIBING);
-    stop();
+    voice.stopListening();
   }
 
   async function handleQuestion(transcript, lang) {
@@ -120,19 +173,25 @@ export default function HandsFree() {
     setLastAnswer('');
     setBusy(true);
     try {
-      const res = await Api.ask(transcript, machine);
+      const res = await Api.ask(transcript, machineRef.current);
       setLastAnswer(res.answer);
       setBusy(false);
-      if (prefs.spoken) {
+      if (prefsRef.current.spoken) {
         await speak(res.answer, lang);
-      } else if (prefs.continuous && prefs.activation === 'wake') {
-        beginListening();
       } else {
-        setState(STATE.IDLE);
+        advanceAfterTurn();
       }
     } catch (err) {
       push(err.message, 'error');
       setBusy(false);
+      advanceAfterTurn();
+    }
+  }
+
+  function advanceAfterTurn() {
+    if (prefsRef.current.continuous && prefsRef.current.activation === 'auto' && voice.sessionOpen) {
+      startListeningTurn();
+    } else {
       setState(STATE.IDLE);
     }
   }
@@ -144,43 +203,66 @@ export default function HandsFree() {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
+
+      // Barge-in: while this plays, keep listening on the still-open mic
+      // session. If the worker starts talking, cut playback immediately
+      // and roll straight into a new recording — no waiting for the
+      // answer to finish.
+      if (prefsRef.current.activation === 'auto') {
+        voice.watchForBargeIn(() => {
+          audio.pause();
+          URL.revokeObjectURL(url);
+          startListeningTurn();
+        });
+      }
+
       audio.onended = () => {
         URL.revokeObjectURL(url);
-        if (prefs.continuous && prefs.activation === 'wake') {
-          beginListening();
-        } else {
-          setState(STATE.IDLE);
-        }
+        voice.clearBargeInWatch();
+        advanceAfterTurn();
       };
-      audio.onerror = () => { URL.revokeObjectURL(url); setState(STATE.IDLE); };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        voice.clearBargeInWatch();
+        advanceAfterTurn();
+      };
       await audio.play();
     } catch (err) {
       push(t('spokenAnswerError'), 'error');
-      setState(STATE.IDLE);
+      advanceAfterTurn();
     }
   }
 
   function handleMicTap() {
-    if (state === STATE.LISTENING) {
-      stopListening();
+    if (state === STATE.OFF) {
+      handleEnterHandsFree();
       return;
+    }
+    if (state === STATE.LISTENING) {
+      if (prefs.activation === 'ptt') stopListeningTurn();
+      return; // in auto mode, VAD ends it — tapping mid-listen does nothing surprising
     }
     if (state === STATE.SPEAKING) {
       audioRef.current?.pause();
-      setState(STATE.IDLE);
+      voice.clearBargeInWatch();
+      advanceAfterTurn();
       return;
     }
     if (state === STATE.THINKING || state === STATE.TRANSCRIBING) return;
-    beginListening();
+    if (state === STATE.IDLE) startListeningTurn();
   }
 
   const statusLabel = {
-    [STATE.IDLE]: prefs.activation === 'wake' ? t('statusIdleWake') : t('statusIdlePtt'),
-    [STATE.LISTENING]: t('statusListening'),
+    [STATE.OFF]: t('statusTapToStart') || 'Tap to start hands-free',
+    [STATE.IDLE]: prefs.activation === 'auto' ? (t('statusIdleAuto') || 'Ready — tap to ask') : t('statusIdlePtt'),
+    [STATE.LISTENING]: prefs.activation === 'auto' ? (t('statusListeningAuto') || "Listening… I'll know when you're done") : t('statusListening'),
     [STATE.TRANSCRIBING]: t('transcribing') || t('thinking'),
     [STATE.THINKING]: t('thinking'),
-    [STATE.SPEAKING]: t('statusSpeaking'),
+    [STATE.SPEAKING]: prefs.activation === 'auto' ? (t('statusSpeakingBargeIn') || 'Speaking… talk anytime to interrupt') : t('statusSpeaking'),
   }[state];
+
+  const isBusyState = state === STATE.THINKING || state === STATE.TRANSCRIBING;
+  const ringLevel = state === STATE.LISTENING ? Math.max(8, voice.micLevel) : 0;
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>
@@ -194,34 +276,61 @@ export default function HandsFree() {
 
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
           {machines.length > 0 ? (
-            <MachineSelect value={machine} onChange={setMachine} machines={machines} />
+            <MachineSelect value={machine} onChange={setMachine} machines={machines} disabled={state !== STATE.OFF} />
           ) : (
             <span style={{ fontSize: 13, color: 'var(--sv-muted)' }}>{t('noMachinesAssigned')}</span>
           )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 24 }}>
-          <button
-            onClick={handleMicTap}
-            disabled={state === STATE.THINKING || state === STATE.TRANSCRIBING || !machine}
-            style={{
-              width: 96, height: 96, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--sv-brass)',
-              boxShadow: state === STATE.LISTENING ? '0 0 0 8px var(--sv-brass-soft)' : '0 0 0 8px transparent',
-              marginBottom: 12, transition: 'box-shadow 0.2s ease',
-            }}
-            aria-label={state === STATE.LISTENING ? t('stopListeningAria') : t('startListeningAria')}
-          >
-            <Mic size={36} color="#fff" />
-          </button>
-          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, color: 'var(--sv-brass)' }}>
+          <div style={{ position: 'relative', width: 96, height: 96, marginBottom: 12 }}>
+            {/* Live level ring while actively listening — real amplitude feedback instead of a static pulse */}
+            {state === STATE.LISTENING && (
+              <div style={{
+                position: 'absolute', inset: -Math.round(ringLevel * 0.5),
+                borderRadius: '50%', border: '3px solid var(--sv-brass-soft)',
+                opacity: 0.6, transition: 'inset 0.08s linear',
+              }} />
+            )}
+            <button
+              onClick={handleMicTap}
+              disabled={isBusyState}
+              style={{
+                position: 'relative', width: 96, height: 96, borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: state === STATE.SPEAKING ? 'var(--sv-teal)' : 'var(--sv-brass)',
+                boxShadow: state === STATE.LISTENING ? '0 0 0 8px var(--sv-brass-soft)' : '0 0 0 8px transparent',
+                transition: 'box-shadow 0.2s ease, background 0.2s ease',
+                cursor: isBusyState ? 'not-allowed' : 'pointer',
+              }}
+              aria-label={state === STATE.LISTENING ? t('stopListeningAria') : t('startListeningAria')}
+            >
+              {state === STATE.SPEAKING ? <Volume2 size={36} color="#fff" /> : <Mic size={36} color="#fff" />}
+            </button>
+          </div>
+
+          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, color: 'var(--sv-brass)', textAlign: 'center' }}>
             <Waves size={14} />
             {statusLabel}
           </p>
-          {state === STATE.LISTENING && (
-            <p style={{ fontSize: 11, color: 'var(--sv-muted)', marginTop: 4 }}>
-              {t('tapAgainToStop') || 'Tap again when done'}
-            </p>
+
+          {state === STATE.LISTENING && prefs.activation === 'ptt' && (
+            <button
+              onClick={stopListeningTurn}
+              className="sv-btn sv-btn--outline"
+              style={{ marginTop: 10, fontSize: 12, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Square size={12} /> {t('tapAgainToStop') || "I'm done"}
+            </button>
+          )}
+
+          {state !== STATE.OFF && (
+            <button
+              onClick={handleExitHandsFree}
+              style={{ marginTop: 14, fontSize: 12, color: 'var(--sv-muted)', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer' }}
+            >
+              {t('exitHandsFree') || 'Exit hands-free'}
+            </button>
           )}
         </div>
 
@@ -245,30 +354,30 @@ export default function HandsFree() {
             value={prefs.spoken}
             onChange={(v) => update({ spoken: v })}
           />
-          {/* <div className="sv-card">
-            <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--sv-ink)', marginBottom: 8 }}>{t('activationTitle')}</p>
+          <div className="sv-card">
+            <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--sv-ink)', marginBottom: 2 }}>{t('activationTitle') || 'Listening mode'}</p>
+            <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginBottom: 8 }}>
+              {t('activationNote') || 'Auto stops recording itself when you stop talking. Push-to-talk needs a tap to end each turn.'}
+            </p>
             <div style={{ display: 'flex', gap: 8 }}>
-              {['wake', 'ptt'].map((mode) => (
+              {['auto', 'ptt'].map((mode) => (
                 <button
                   key={mode}
+                  disabled={state !== STATE.OFF && state !== STATE.IDLE}
                   onClick={() => update({ activation: mode })}
                   style={{
                     fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 'var(--sv-radius-full)',
                     background: prefs.activation === mode ? 'var(--sv-activation-bg)' : 'transparent',
                     color: prefs.activation === mode ? 'var(--sv-activation-text)' : 'var(--sv-muted)',
                     border: `1px solid ${prefs.activation === mode ? 'var(--sv-activation-bg)' : 'var(--sv-activation-border)'}`,
+                    cursor: (state !== STATE.OFF && state !== STATE.IDLE) ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {mode === 'wake' ? t('activationWake') : t('activationPtt')}
+                  {mode === 'auto' ? (t('activationAuto') || 'Auto (hands-free)') : t('activationPtt')}
                 </button>
               ))}
             </div>
-            {prefs.activation === 'wake' && (
-              <p style={{ fontSize: 11, color: 'var(--sv-muted)', marginTop: 8 }}>
-                {t('wakeWordHint')}
-              </p>
-            )}
-          </div> */}
+          </div>
         </div>
       </div>
     </div>
