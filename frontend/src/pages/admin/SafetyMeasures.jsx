@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ShieldCheck, Plus, Trash2, Pencil, ChevronUp, ChevronDown,
-  X, Users, EyeOff, Eye,
+  X, Users, EyeOff, Eye, Video, VideoOff, Loader2,
 } from 'lucide-react';
-import { Api } from '../../lib/api';
+import { Api, mediaUrl } from '../../lib/api';
 import { useToast } from '../../lib/toast';
+
+const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'];
+const MAX_VIDEO_BYTES = 80 * 1024 * 1024; // matches backend's 80MB limit
 
 const LANGUAGE_OPTIONS = [
   { code: 'en-IN', label: 'English' },
@@ -29,6 +32,32 @@ function formatDate(iso) {
 
 function MeasureForm({ initial, onCancel, onSubmit, saving }) {
   const [form, setForm] = useState(initial || emptyForm);
+  const [videoFile, setVideoFile] = useState(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
+  const inputRef = useRef(null);
+  const { push } = useToast();
+
+  useEffect(() => {
+    if (!videoFile) { setVideoPreviewUrl(null); return; }
+    const url = URL.createObjectURL(videoFile);
+    setVideoPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [videoFile]);
+
+  function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+      push('Only MP4, WebM, MOV or AVI videos are allowed.', 'error');
+      return;
+    }
+    if (file.size > MAX_VIDEO_BYTES) {
+      push('Video is too large. Maximum size is 80 MB.', 'error');
+      return;
+    }
+    setVideoFile(file);
+  }
 
   return (
     <div className="sv-card" style={{ padding: 18, marginBottom: 14, border: '1px solid var(--sv-brass)' }}>
@@ -96,13 +125,59 @@ function MeasureForm({ initial, onCancel, onSubmit, saving }) {
         </label>
       </div>
 
+      {/* Optional video — only offered here for a brand-new measure,
+          attached right after save once the measure has an id. Existing
+          measures already have a video control on their row (below). */}
+      {!initial?.id && (
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--sv-muted)', marginBottom: 4 }}>
+            Video (optional)
+          </label>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="video/mp4,video/webm,video/quicktime,video/x-msvideo"
+            style={{ display: 'none' }}
+            onChange={handleFile}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {videoFile && (
+              <video
+                src={videoPreviewUrl}
+                controls
+                preload="metadata"
+                style={{ width: 160, maxHeight: 90, borderRadius: 'var(--sv-radius-sm)', background: '#000', display: 'block' }}
+              />
+            )}
+            <button
+              type="button"
+              className="sv-btn sv-btn--outline sv-btn--sm"
+              onClick={() => inputRef.current?.click()}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Video size={13} /> {videoFile ? 'Choose different video' : 'Attach video'}
+            </button>
+            {videoFile && (
+              <button
+                type="button"
+                className="sv-btn sv-btn--outline sv-btn--sm"
+                onClick={() => setVideoFile(null)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--sv-danger)' }}
+              >
+                <VideoOff size={13} /> Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button className="sv-btn sv-btn--outline sv-btn--sm" onClick={onCancel} type="button">Cancel</button>
         <button
           className="sv-btn sv-btn--brass sv-btn--sm"
           type="button"
           disabled={saving || !form.title.trim() || !form.content.trim()}
-          onClick={() => onSubmit(form)}
+          onClick={() => onSubmit(form, videoFile)}
         >
           {saving ? 'Saving…' : initial?.id ? 'Save changes' : 'Add measure'}
         </button>
@@ -113,14 +188,33 @@ function MeasureForm({ initial, onCancel, onSubmit, saving }) {
 
 function CompletionsPanel({ machineId, onClose }) {
   const [rows, setRows] = useState(null);
+  const [retaking, setRetaking] = useState(null); // worker_id currently being reset
   const { push } = useToast();
 
-  useEffect(() => {
+  function load() {
+    setRows(null);
     Api.safetyCompletions(machineId)
       .then((res) => setRows(res.completions || []))
       .catch((err) => push(err.message, 'error'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [machineId]);
+  }
+
+  useEffect(load, [machineId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleRequireRetake(r) {
+    if (!window.confirm(
+      `Require ${r.worker_name} to go through this briefing again? They'll show as "not completed" until they do.`
+    )) return;
+    setRetaking(r.worker_id);
+    try {
+      await Api.requireSafetyRetake(machineId, r.worker_id);
+      push(`${r.worker_name} will be asked to redo this briefing.`, 'success');
+      load();
+    } catch (err) {
+      push(err.message, 'error');
+    } finally {
+      setRetaking(null);
+    }
+  }
 
   return (
     <div className="sv-card" style={{ padding: 18, marginBottom: 14 }}>
@@ -138,14 +232,122 @@ function CompletionsPanel({ machineId, onClose }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {rows.map((r) => (
             <div key={r.worker_id} style={{
-              display: 'flex', justifyContent: 'space-between', fontSize: 13,
-              padding: '8px 10px', borderRadius: 'var(--sv-radius-sm)', background: 'var(--sv-bg)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 13,
+              padding: '8px 10px', borderRadius: 'var(--sv-radius-sm)', background: 'var(--sv-bg)', flexWrap: 'wrap',
             }}>
               <span style={{ color: 'var(--sv-ink)', fontWeight: 500 }}>{r.worker_name} <span style={{ color: 'var(--sv-muted)', fontWeight: 400 }}>({r.worker_id})</span></span>
-              <span style={{ color: 'var(--sv-muted)' }}>{formatDate(r.completed_at)}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: 'var(--sv-muted)' }}>{formatDate(r.completed_at)}</span>
+                <button
+                  type="button"
+                  onClick={() => handleRequireRetake(r)}
+                  disabled={retaking === r.worker_id}
+                  className="sv-btn sv-btn--outline sv-btn--sm"
+                  style={{ fontSize: 12 }}
+                >
+                  {retaking === r.worker_id ? 'Resetting…' : 'Require retake'}
+                </button>
+              </div>
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Optional video for one measure - text/title/content are managed
+ * entirely by MeasureForm above and untouched by this. Just a thin
+ * upload/replace/remove control per row, next to the existing actions.
+ */
+function MeasureVideo({ measure, onChanged }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const { push } = useToast();
+
+  function pickFile() {
+    inputRef.current?.click();
+  }
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+      push('Only MP4, WebM, MOV or AVI videos are allowed.', 'error');
+      return;
+    }
+    if (file.size > MAX_VIDEO_BYTES) {
+      push('Video is too large. Maximum size is 80 MB.', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      await Api.uploadSafetyVideo(measure.id, file);
+      push(measure.video_url ? 'Video replaced.' : 'Video added.', 'success');
+      onChanged();
+    } catch (err) {
+      push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!window.confirm('Remove the video from this step? The text stays.')) return;
+    setBusy(true);
+    try {
+      await Api.deleteSafetyVideo(measure.id);
+      push('Video removed.', 'success');
+      onChanged();
+    } catch (err) {
+      push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime,video/x-msvideo"
+        style={{ display: 'none' }}
+        onChange={handleFile}
+      />
+
+      {measure.video_url && (
+        <video
+          src={mediaUrl(measure.video_url)}
+          controls
+          preload="metadata"
+          style={{ width: 160, maxHeight: 90, borderRadius: 'var(--sv-radius-sm)', background: '#000', display: 'block' }}
+        />
+      )}
+
+      <button
+        type="button"
+        onClick={pickFile}
+        disabled={busy}
+        className="sv-btn sv-btn--outline sv-btn--sm"
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+      >
+        {busy ? <Loader2 size={13} className="sv-spin" /> : <Video size={13} />}
+        {measure.video_url ? 'Replace video' : 'Add video'}
+      </button>
+
+      {measure.video_url && (
+        <button
+          type="button"
+          onClick={handleRemove}
+          disabled={busy}
+          className="sv-btn sv-btn--outline sv-btn--sm"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--sv-danger)' }}
+        >
+          <VideoOff size={13} /> Remove
+        </button>
       )}
     </div>
   );
@@ -184,7 +386,7 @@ export default function SafetyMeasures() {
     if (machine) loadMeasures(machine);
   }, [machine]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleSubmit(form) {
+  async function handleSubmit(form, videoFile) {
     setSaving(true);
     try {
       if (showForm?.id) {
@@ -197,7 +399,7 @@ export default function SafetyMeasures() {
         push('Safety measure updated.', 'success');
       } else {
         const nextOrder = (measures?.length ? Math.max(...measures.map((m) => m.sort_order)) : 0) + 1;
-        await Api.createSafetyMeasure({
+        const res = await Api.createSafetyMeasure({
           machine_id: machine,
           title: form.title.trim(),
           content: form.content.trim(),
@@ -206,6 +408,16 @@ export default function SafetyMeasures() {
           sort_order: nextOrder,
         });
         push('Safety measure added.', 'success');
+
+        // Text is already saved at this point - a video upload failure
+        // here shouldn't look like the whole save failed.
+        if (videoFile && res?.measure?.id) {
+          try {
+            await Api.uploadSafetyVideo(res.measure.id, videoFile);
+          } catch (videoErr) {
+            push(`Measure saved, but the video failed to upload: ${videoErr.message}`, 'error');
+          }
+        }
       }
       setShowForm(false);
       loadMeasures(machine);
@@ -372,6 +584,8 @@ export default function SafetyMeasures() {
               <span style={{ fontSize: 11, color: 'var(--sv-muted-light)' }}>
                 {LANGUAGE_OPTIONS.find((l) => l.code === m.language_code)?.label || m.language_code}
               </span>
+
+              <MeasureVideo measure={m} onChanged={() => loadMeasures(machine)} />
             </div>
 
             <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>

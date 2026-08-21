@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import SpeakButton from '../../components/SpeakButton';
-import { Api } from '../../lib/api';
+import { Api, mediaUrl } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 import { useI18n } from '../../lib/i18n';
 import { getLanguage } from '../../lib/languages';
@@ -209,6 +209,21 @@ export default function SafetyBriefing() {
             <p style={{ fontSize: 14.5, color: 'var(--sv-ink-secondary)', lineHeight: 1.65, margin: 0, whiteSpace: 'pre-wrap' }}>
               {current.content}
             </p>
+
+            {/* Optional video for this step - text stays the source of
+                truth either way, this is just illustrative. */}
+            {current.video_url && (
+              <video
+                key={current.id}
+                src={mediaUrl(current.video_url)}
+                controls
+                preload="metadata"
+                style={{
+                  width: '100%', maxHeight: 320, borderRadius: 'var(--sv-radius-md)',
+                  background: '#000', display: 'block',
+                }}
+              />
+            )}
           </div>
 
           {/* Nav buttons */}

@@ -433,6 +433,28 @@ export const Api = {
   safetyCompletions: (machine_id) =>
     apiFetch(`/admin/safety/${encodeURIComponent(machine_id)}/completions`, { auth: 'admin' }),
 
+  /* Clears one worker's completion so they show as "required" again and
+     must redo the briefing - e.g. after a measure changed materially. */
+  requireSafetyRetake: (machine_id, worker_id) =>
+    apiFetch(
+      `/admin/safety/${encodeURIComponent(machine_id)}/completions/${encodeURIComponent(worker_id)}`,
+      { method: 'DELETE', auth: 'admin' },
+    ),
+
+  /* Attach/replace or remove the optional video on one measure. Text
+     fields are never touched by these - purely additive to the
+     existing create/update flow above. */
+  uploadSafetyVideo: (measure_id, file) => {
+    const form = new FormData();
+    form.append('video', file);
+    return apiFetch(`/admin/safety/${encodeURIComponent(measure_id)}/video`, {
+      method: 'POST', auth: 'admin', isForm: true, body: form,
+    });
+  },
+
+  deleteSafetyVideo: (measure_id) =>
+    apiFetch(`/admin/safety/${encodeURIComponent(measure_id)}/video`, { method: 'DELETE', auth: 'admin' }),
+
   /* ---------------- Tickets ---------------- */
   createTicket: (data) =>
     apiFetch('/tickets', { method: 'POST', auth: 'worker', body: data }),
