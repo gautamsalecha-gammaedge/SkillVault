@@ -6,6 +6,7 @@ import { useHandsFreeVoice } from '../../lib/useHandsFreeVoice';
 import { useToast } from '../../lib/toast';
 import { useHandsFreeSession } from '../../lib/workerSession';
 import { useI18n } from '../../lib/i18n';
+import { getBrowserVoice } from '../../lib/voiceCapabilities';
 
 const KEY = 'sv_handsfree_prefs';
 function loadPrefs() {
@@ -70,7 +71,7 @@ export default function HandsFree() {
   const [liveText, setLiveText] = useState('');
   const audioRef = useRef(null);
   const transcriptEndRef = useRef(null);
-  const recognitionRef = useRef(null);
+  const utteranceRef = useRef(null); // browser SpeechSynthesisUtterance currently playing, if any
   const { push } = useToast();
   const voice = useHandsFreeVoice();
   const stateRef = useRef(state);
@@ -94,8 +95,7 @@ export default function HandsFree() {
   }, []);
 
   useEffect(() => () => {
-    audioRef.current?.pause();
-    stopLiveCaption();
+    stopSpeaking();
     voice.closeSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -114,41 +114,16 @@ export default function HandsFree() {
     setTranscript((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   }
 
-  function startLiveCaption() {
-    setLiveText('');
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
-    try {
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = detectedLang || 'en-IN';
-      rec.onresult = (e) => {
-        let text = '';
-        for (let i = 0; i < e.results.length; i++) {
-          text += e.results[i][0].transcript;
-        }
-        setLiveText(text.trim());
-      };
-      rec.onerror = () => {};
-      rec.onend = () => {
-        // Keep going only while still listening
-        if (stateRef.current === STATE.LISTENING && recognitionRef.current === rec) {
-          try { rec.start(); } catch { /* already stopped */ }
-        }
-      };
-      rec.start();
-      recognitionRef.current = rec;
-    } catch {
-      /* optional feature */
+  // Stops whichever TTS engine (Sarvam <audio> or browser SpeechSynthesis)
+  // happens to be speaking right now - the three interrupt points below
+  // (unmount, exit hands-free, tap-to-interrupt) all need to work
+  // regardless of which one played this particular answer.
+  function stopSpeaking() {
+    audioRef.current?.pause();
+    if (utteranceRef.current) {
+      window.speechSynthesis?.cancel();
+      utteranceRef.current = null;
     }
-  }
-
-  function stopLiveCaption() {
-    try {
-      recognitionRef.current?.stop();
-    } catch { /* noop */ }
-    recognitionRef.current = null;
   }
 
   async function handleEnterHandsFree() {
@@ -172,8 +147,7 @@ export default function HandsFree() {
   }
 
   function handleExitHandsFree() {
-    audioRef.current?.pause();
-    stopLiveCaption();
+    stopSpeaking();
     setLiveText('');
     voice.cancelTurn();
     voice.clearBargeInWatch();
@@ -186,17 +160,14 @@ export default function HandsFree() {
     setState(STATE.LISTENING);
     setLiveText('');
     beep(760, 90);
-    startLiveCaption();
     voice.listenOnce(
       ({ transcript: text, language_code }) => {
-        stopLiveCaption();
         setLiveText('');
         if (language_code) setDetectedLang(language_code);
         setState(STATE.THINKING);
         handleQuestion(text, language_code || detectedLang);
       },
       (err) => {
-        stopLiveCaption();
         setLiveText('');
         if (err === '__EMPTY__') {
           if (
@@ -211,12 +182,17 @@ export default function HandsFree() {
         setState(STATE.IDLE);
         push(err || t('micErrorHandsFree'), 'error');
       },
+      // onInterim - live, on-screen captions while the worker talks.
+      // Only fires when voice.listenOnce is using the browser STT path;
+      // the Sarvam fallback path has no interim results, so liveText
+      // just stays empty for that turn (as it always did before Sarvam
+      // finished transcribing).
+      (interimText) => setLiveText(interimText),
     );
   }
 
   function stopListeningTurn() {
     setState(STATE.TRANSCRIBING);
-    stopLiveCaption();
     voice.stopListening();
   }
 
@@ -264,35 +240,78 @@ export default function HandsFree() {
     }
   }
 
+  async function speakViaSarvam(text, langCode, entryId) {
+    const { blob } = await Api.speak(text, langCode);
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audioRef.current = audio;
+
+    if (prefsRef.current.activation === 'auto') {
+      voice.watchForBargeIn(() => {
+        audio.pause();
+        URL.revokeObjectURL(url);
+        startListeningTurn();
+      });
+    }
+
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      voice.clearBargeInWatch();
+      advanceAfterTurn();
+    };
+    audio.onerror = () => {
+      console.error('[HandsFree] audio playback error for entry', entryId);
+      URL.revokeObjectURL(url);
+      voice.clearBargeInWatch();
+      updateEntry(entryId, { audioFailed: true });
+      advanceAfterTurn();
+    };
+    await audio.play();
+  }
+
+  function speakViaBrowser(voiceOpt, text, langCode, entryId) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.voice = voiceOpt;
+    utterance.lang = langCode;
+    utteranceRef.current = utterance;
+
+    if (prefsRef.current.activation === 'auto') {
+      voice.watchForBargeIn(() => {
+        window.speechSynthesis.cancel();
+        utteranceRef.current = null;
+        startListeningTurn();
+      });
+    }
+
+    utterance.onend = () => {
+      utteranceRef.current = null;
+      voice.clearBargeInWatch();
+      advanceAfterTurn();
+    };
+    utterance.onerror = () => {
+      utteranceRef.current = null;
+      voice.clearBargeInWatch();
+      // Browser voice failed mid-flight - fall back to Sarvam for this
+      // turn rather than leaving the worker stuck with no audio.
+      speakViaSarvam(text, langCode, entryId).catch(() => {
+        updateEntry(entryId, { audioFailed: true });
+        push(t('spokenAnswerError'), 'error');
+        advanceAfterTurn();
+      });
+    };
+    window.speechSynthesis.speak(utterance);
+  }
+
   async function speak(text, lang, entryId) {
     setState(STATE.SPEAKING);
+    const langCode = lang || detectedLang;
+    const browserVoice = getBrowserVoice(langCode);
+    if (browserVoice) {
+      speakViaBrowser(browserVoice, text, langCode, entryId);
+      return;
+    }
     try {
-      const { blob } = await Api.speak(text, lang || detectedLang);
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-
-      if (prefsRef.current.activation === 'auto') {
-        voice.watchForBargeIn(() => {
-          audio.pause();
-          URL.revokeObjectURL(url);
-          startListeningTurn();
-        });
-      }
-
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        voice.clearBargeInWatch();
-        advanceAfterTurn();
-      };
-      audio.onerror = () => {
-        console.error('[HandsFree] audio playback error for entry', entryId);
-        URL.revokeObjectURL(url);
-        voice.clearBargeInWatch();
-        updateEntry(entryId, { audioFailed: true });
-        advanceAfterTurn();
-      };
-      await audio.play();
+      await speakViaSarvam(text, langCode, entryId);
     } catch (err) {
       console.error('[HandsFree] speak() failed:', err);
       updateEntry(entryId, { audioFailed: true });
@@ -311,7 +330,7 @@ export default function HandsFree() {
       return;
     }
     if (state === STATE.SPEAKING) {
-      audioRef.current?.pause();
+      stopSpeaking();
       voice.clearBargeInWatch();
       advanceAfterTurn();
       return;

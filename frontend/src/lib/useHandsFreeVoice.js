@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Api } from './api';
+import { getLanguage } from './languages';
+import { getSpeechRecognitionCtor } from './voiceCapabilities';
 
 const SPEECH_LEVEL = 8;
 const SILENCE_MS = 1200;
@@ -25,6 +27,7 @@ export function useHandsFreeVoice() {
 
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const recognitionRef = useRef(null); // browser SpeechRecognition, when used in place of MediaRecorder+Sarvam
   const recordingRef = useRef(false);
   const speechStartedAtRef = useRef(null);
   const lastSpeechAtRef = useRef(null);
@@ -154,6 +157,12 @@ export function useHandsFreeVoice() {
       recorderRef.current.onstop = null;
       try { recorderRef.current.stop(); } catch { /* noop */ }
     }
+    if (recognitionRef.current) {
+      const rec = recognitionRef.current;
+      recognitionRef.current = null;
+      rec.onresult = null; rec.onerror = null; rec.onend = null;
+      try { rec.stop(); } catch { /* noop */ }
+    }
     recordingRef.current = false;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -177,13 +186,23 @@ export function useHandsFreeVoice() {
   }, [closeSession]);
 
   function stopRecordingSegment() {
+    // Must flip this BEFORE stopping either engine - it's what tells a
+    // browser-recognition onend (below) that this is a real stop, not a
+    // silence-timeout blip to transparently restart from.
+    recordingRef.current = false;
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch { /* noop */ }
+      return;
+    }
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === 'inactive') return;
-    recordingRef.current = false;
     try { recorder.stop(); } catch { /* noop */ }
   }
 
-  const listenOnce = useCallback((onResult, onError) => {
+  /* Sarvam path (original behaviour, untouched): record raw audio with
+     MediaRecorder, send the blob to the backend for STT once our own VAD
+     (the level loop above) decides the turn is over. */
+  const listenOnceSarvam = useCallback((onResult, onError) => {
     const stream = streamRef.current;
     if (!stream) { onError?.('Mic session not open.'); return; }
 
@@ -244,11 +263,96 @@ export function useHandsFreeVoice() {
     }
   }, []);
 
+  /* Browser path: runs entirely on-device via SpeechRecognition, no
+     backend round trip. Our own level-loop VAD above still owns the
+     "when is this turn over" decision (same SPEECH_LEVEL/SILENCE_MS
+     tuning either engine uses) - it calls stopRecordingSegment(), which
+     calls recognition.stop() here instead of recorder.stop(). Chrome can
+     silently end a "continuous" recognition early on a brief pause even
+     mid-turn; recordingRef.current still being true is what tells onend
+     that's just a blip to restart from, not our own stop. onInterim (if
+     given) mirrors the live-caption behaviour the old dedicated caption
+     recognizer used to provide - callers no longer need a second
+     instance for that. */
+  const listenOnceBrowser = useCallback((onResult, onError, onInterim) => {
+    const SpeechRecognitionCtor = getSpeechRecognitionCtor();
+    const langCode = getLanguage();
+    let finalText = '';
+    let everGotSpeech = false;
+
+    const attach = () => {
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = langCode;
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) {
+            finalText += (finalText ? ' ' : '') + e.results[i][0].transcript;
+            everGotSpeech = true;
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+        if (interim) onInterim?.(interim);
+      };
+
+      recognition.onerror = (e) => {
+        const hardFailures = ['language-not-supported', 'service-not-allowed', 'network', 'audio-capture'];
+        if (hardFailures.includes(e.error) && !everGotSpeech) {
+          // Genuinely can't use the browser for this attempt - hand this
+          // turn off to Sarvam instead of dead-ending it.
+          recognitionRef.current = null;
+          listenOnceSarvam(onResult, onError);
+        }
+        // Anything else (no-speech, aborted) - onend below decides what happens next.
+      };
+
+      recognition.onend = () => {
+        if (recordingRef.current) {
+          try { recognition.start(); } catch { /* already ended for good */ }
+          return;
+        }
+        recognitionRef.current = null;
+        if (finalText.trim()) {
+          onResult({ transcript: finalText.trim(), language_code: langCode });
+        } else {
+          onError?.('__EMPTY__');
+        }
+      };
+
+      recognitionRef.current = recognition;
+      try { recognition.start(); } catch { /* noop - onend/onerror won't fire either, treated as silent no-op turn */ }
+    };
+
+    recordStartedAtRef.current = performance.now();
+    speechStartedAtRef.current = null;
+    lastSpeechAtRef.current = null;
+    recordingRef.current = true;
+    attach();
+  }, [listenOnceSarvam]);
+
+  const listenOnce = useCallback((onResult, onError, onInterim) => {
+    if (getSpeechRecognitionCtor()) {
+      listenOnceBrowser(onResult, onError, onInterim);
+    } else {
+      listenOnceSarvam(onResult, onError);
+    }
+  }, [listenOnceBrowser, listenOnceSarvam]);
+
   const stopListening = useCallback(() => {
     stopRecordingSegment();
   }, []);
 
   const cancelTurn = useCallback(() => {
+    if (recognitionRef.current) {
+      const rec = recognitionRef.current;
+      recognitionRef.current = null;
+      rec.onresult = null; rec.onerror = null; rec.onend = null;
+      try { rec.stop(); } catch { /* noop */ }
+    }
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
       recorder.ondataavailable = null;

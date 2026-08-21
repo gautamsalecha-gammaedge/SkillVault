@@ -5,6 +5,7 @@ import { getWorkerName } from '../../lib/auth';
 import { LANGUAGES, getLanguage, setLanguage } from '../../lib/languages';
 import { useToast } from '../../lib/toast';
 import MachineSelect from '../../components/MachineSelect';
+import { getBrowserVoice } from '../../lib/voiceCapabilities';
 
 /* How long the "take a moment to think" countdown runs before the mic
    auto-starts listening. A worker can always tap "I'm ready" to skip
@@ -51,6 +52,7 @@ export default function Interview() {
   const rafRef = useRef(null);
   const countdownTimerRef = useRef(null);
   const audioElRef = useRef(null);
+  const utteranceRef = useRef(null); // browser SpeechSynthesisUtterance currently playing, if any
   const liveCaptionRef = useRef(null); // browser SpeechRecognition, display-only
   const listeningRef = useRef(false); // true only while we WANT the live caption running - lets onend know whether to auto-restart after a silence timeout vs a real stop
   const workerLineIdRef = useRef(null); // id of the single thread line for the answer currently being recorded/retried, so retries update it in place instead of stacking new lines
@@ -102,6 +104,10 @@ export default function Interview() {
       try { audioElRef.current.pause(); audioElRef.current.src = ''; } catch (_) {}
       audioElRef.current = null;
     }
+    if (utteranceRef.current) {
+      try { window.speechSynthesis?.cancel(); } catch (_) {}
+      utteranceRef.current = null;
+    }
   }
 
   function pushLine(speaker, text, muted = false) {
@@ -134,24 +140,47 @@ export default function Interview() {
     setThread((t) => t.map((l) => (l.id === workerLineIdRef.current ? { ...l, text } : l)));
   }
 
-  /* ---------------- TTS playback for AI lines ---------------- */
+  /* ---------------- TTS playback for AI lines ----------------
+     Tries the browser's own SpeechSynthesis first when it has a voice
+     for langCode - on-device, no backend round trip. Falls back to the
+     backend's Sarvam-backed Api.speak when the browser has no matching
+     voice, or if browser playback errors out mid-utterance. */
+  async function playSpeech(text, langCode) {
+    const browserVoice = getBrowserVoice(langCode);
+    if (browserVoice) {
+      const played = await new Promise((resolve) => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.voice = browserVoice;
+        utterance.lang = langCode;
+        utteranceRef.current = utterance;
+        utterance.onend = () => { utteranceRef.current = null; resolve(true); };
+        utterance.onerror = () => { utteranceRef.current = null; resolve(false); };
+        window.speechSynthesis.speak(utterance);
+      });
+      if (played) return;
+      // Browser voice failed mid-flight - fall through to Sarvam below.
+    }
+
+    const blob = await Api.speak(text, langCode);
+    if (!mountedRef.current) return;
+    const url = URL.createObjectURL(blob);
+    await new Promise((resolve) => {
+      const audio = new Audio(url);
+      audioElRef.current = audio;
+      audio.onended = resolve;
+      audio.onerror = resolve;
+      audio.play().catch(resolve);
+    });
+    URL.revokeObjectURL(url);
+  }
+
   async function speakAndShow(text, langCode) {
     setStage(STAGE.AI_SPEAKING);
     pushLine('ai', text);
     forgetWorkerLine();
     lastAiLineRef.current = { text, langCode };
     try {
-      const blob = await Api.speak(text, langCode);
-      if (!mountedRef.current) return;
-      const url = URL.createObjectURL(blob);
-      await new Promise((resolve) => {
-        const audio = new Audio(url);
-        audioElRef.current = audio;
-        audio.onended = resolve;
-        audio.onerror = resolve;
-        audio.play().catch(resolve);
-      });
-      URL.revokeObjectURL(url);
+      await playSpeech(text, langCode);
     } catch (e) {
       // TTS failed - the text is already on screen, so the flow can
       // continue without audio rather than getting stuck. Surface it
@@ -168,14 +197,7 @@ export default function Interview() {
     if (!lastAiLineRef.current) return;
     const { text, langCode } = lastAiLineRef.current;
     try {
-      const blob = await Api.speak(text, langCode);
-      if (!mountedRef.current) return;
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioElRef.current = audio;
-      audio.onended = () => URL.revokeObjectURL(url);
-      audio.onerror = () => URL.revokeObjectURL(url);
-      audio.play().catch(() => {});
+      await playSpeech(text, langCode);
     } catch (e) {
       toast.push('Still could not play audio. Check your connection and try again.', 'error');
     }

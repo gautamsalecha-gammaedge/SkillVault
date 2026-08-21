@@ -3,24 +3,28 @@ import { Volume2, Loader2, Square } from 'lucide-react';
 import { Api } from '../lib/api';
 import { getLanguage } from '../lib/languages';
 import { useToast } from '../lib/toast';
+import { getBrowserVoice } from '../lib/voiceCapabilities';
 
 /**
- * Plays a piece of text through the backend's /speak endpoint
- * (Api.speak — already implemented in lib/api.js, just never had
- * a UI control wired to it). Three states: idle, loading (fetching
+ * Plays a piece of text out loud. Three states: idle, loading (fetching
  * audio), playing (tap again to stop).
  *
- * `lang` lets a caller pass the Sarvam-detected language_code for
- * this specific piece of text (e.g. a clarifying question or spoken
- * confirmation that was generated in the worker's own spoken
- * language). Falls back to getLanguage() only when no `lang` prop
- * is given, so existing callers that never pass one keep working
- * unchanged.
+ * Tries the browser's own SpeechSynthesis first when it has a voice for
+ * the target language - on-device, no backend round trip, and it covers
+ * whatever language the worker's browser/OS supports. Falls back to the
+ * backend's /speak endpoint (Api.speak -> Sarvam) when the browser has no
+ * matching voice, or if browser playback errors out mid-utterance.
+ *
+ * `lang` lets a caller pass the detected language_code for this specific
+ * piece of text (e.g. a clarifying question generated in the worker's own
+ * spoken language). Falls back to getLanguage() only when no `lang` prop
+ * is given, so existing callers that never pass one keep working unchanged.
  */
 export default function SpeakButton({ text, lang, size = 14, style, label }) {
   const [status, setStatus] = useState('idle'); // idle | loading | playing
   const audioRef = useRef(null);
   const urlRef = useRef(null);
+  const utteranceRef = useRef(null);
   const { push } = useToast();
 
   function cleanup() {
@@ -32,6 +36,41 @@ export default function SpeakButton({ text, lang, size = 14, style, label }) {
       URL.revokeObjectURL(urlRef.current);
       urlRef.current = null;
     }
+    if (utteranceRef.current) {
+      window.speechSynthesis?.cancel();
+      utteranceRef.current = null;
+    }
+  }
+
+  async function playViaSarvam(langCode) {
+    const { blob } = await Api.speak(text, langCode);
+    const url = URL.createObjectURL(blob);
+    urlRef.current = url;
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.onended = () => { cleanup(); setStatus('idle'); };
+    audio.onerror = () => { cleanup(); setStatus('idle'); push("Couldn't play audio.", 'error'); };
+    await audio.play();
+    setStatus('playing');
+  }
+
+  function playViaBrowser(voice, langCode) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.voice = voice;
+    utterance.lang = langCode;
+    utterance.onend = () => { utteranceRef.current = null; setStatus('idle'); };
+    utterance.onerror = () => {
+      utteranceRef.current = null;
+      // Browser voice failed mid-flight - fall back to Sarvam rather than
+      // leaving the worker with a dead "Listen" button.
+      playViaSarvam(langCode).catch(() => {
+        setStatus('idle');
+        push("Couldn't generate audio.", 'error');
+      });
+    };
+    utteranceRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+    setStatus('playing');
   }
 
   async function handleClick() {
@@ -41,17 +80,17 @@ export default function SpeakButton({ text, lang, size = 14, style, label }) {
       return;
     }
     if (!text?.trim()) return;
+
+    const langCode = lang || getLanguage();
+    const voice = getBrowserVoice(langCode);
+    if (voice) {
+      playViaBrowser(voice, langCode);
+      return;
+    }
+
     setStatus('loading');
     try {
-      const { blob } = await Api.speak(text, lang || getLanguage());
-      const url = URL.createObjectURL(blob);
-      urlRef.current = url;
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.onended = () => { cleanup(); setStatus('idle'); };
-      audio.onerror = () => { cleanup(); setStatus('idle'); push("Couldn't play audio.", 'error'); };
-      await audio.play();
-      setStatus('playing');
+      await playViaSarvam(langCode);
     } catch (err) {
       setStatus('idle');
       push(err.message || "Couldn't generate audio.", 'error');
