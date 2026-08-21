@@ -166,6 +166,11 @@ class SafetyMeasure(Base):
     sort_order = Column(Integer, nullable=False, default=1)
     is_active = Column(Boolean, nullable=False, default=True)
     language_code = Column(String, nullable=False, default="en-IN")
+    video_url = Column(String, nullable=True)
+    # Optional short video for this step, shown alongside the text on
+    # the worker's briefing card. Uploaded separately via
+    # POST /admin/safety/{id}/video - never required, never touches the
+    # text create/update flow. See routers/safety.py.
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

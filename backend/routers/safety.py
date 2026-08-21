@@ -16,13 +16,17 @@ Admin:
   DELETE /admin/safety/{id}                      - soft-delete (is_active=False)
   POST   /admin/safety/reorder                   - bulk update sort_order
   GET    /admin/safety/{machine_id}/completions  - who completed the briefing
+  DELETE /admin/safety/{machine_id}/completions/{worker_id} - require a worker to redo the briefing
+  POST   /admin/safety/{id}/video                - attach/replace a video on a measure
+  DELETE /admin/safety/{id}/video                - remove a measure's video
 """
 
+import os
 import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from db import get_db
@@ -35,6 +39,17 @@ from schemas import (
 )
 from auth.worker_auth import require_worker
 from auth.admin_auth import require_admin
+from rag.video_storage import save_video
+
+# Same limits Add Tip uses for worker-uploaded videos (routers/knowledge.py) -
+# kept consistent so admins hit the same expectations.
+ALLOWED_VIDEO_TYPES = {
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",  # .mov
+    "video/x-msvideo",  # .avi
+}
+MAX_VIDEO_BYTES = 80 * 1024 * 1024  # 80 MB
 
 router = APIRouter(prefix="/safety", tags=["Safety"])
 admin_router = APIRouter(prefix="/admin/safety", tags=["Safety Admin"])
@@ -66,6 +81,7 @@ def _measure_dict(m: SafetyMeasure) -> dict:
         "sort_order": m.sort_order,
         "is_active": m.is_active,
         "language_code": m.language_code,
+        "video_url": m.video_url,
         "created_at": m.created_at,
         "updated_at": m.updated_at,
     }
@@ -386,6 +402,71 @@ def admin_reorder_measures(
     return {"status": "reordered", "updated": updated}
 
 
+@admin_router.post("/{measure_id}/video")
+async def admin_upload_measure_video(
+    measure_id: str,
+    video: UploadFile = File(...),
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Attaches (or replaces) the video shown alongside this measure's text
+    on the worker's briefing card. Text/title/content are untouched -
+    this only ever sets video_url.
+    """
+    measure = db.query(SafetyMeasure).filter(SafetyMeasure.id == measure_id).first()
+    if not measure:
+        raise HTTPException(status_code=404, detail="Safety measure not found.")
+
+    if video.content_type not in ALLOWED_VIDEO_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Only MP4, WebM, MOV or AVI videos are allowed.",
+        )
+
+    content = await video.read()
+    if len(content) > MAX_VIDEO_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="Video is too large. Maximum size is 80 MB.",
+        )
+    await video.seek(0)
+
+    measure.video_url = await save_video(video, measure.machine_id)
+    measure.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(measure)
+    return {"status": "video attached", "measure": _measure_dict(measure)}
+
+
+@admin_router.delete("/{measure_id}/video")
+def admin_remove_measure_video(
+    measure_id: str,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Removes the video from a measure (text/title/content untouched)."""
+    measure = db.query(SafetyMeasure).filter(SafetyMeasure.id == measure_id).first()
+    if not measure:
+        raise HTTPException(status_code=404, detail="Safety measure not found.")
+
+    old_url = measure.video_url
+    measure.video_url = None
+    measure.updated_at = datetime.utcnow()
+    db.commit()
+
+    # Best-effort file cleanup - don't fail the request if this doesn't work.
+    if old_url:
+        try:
+            local_path = old_url.lstrip("/")
+            if os.path.isfile(local_path):
+                os.remove(local_path)
+        except OSError:
+            pass
+
+    return {"status": "video removed", "id": measure_id}
+
+
 @admin_router.get("/{machine_id}/completions")
 def admin_list_completions(
     machine_id: str,
@@ -411,4 +492,40 @@ def admin_list_completions(
             }
             for c, w in rows
         ],
+    }
+
+
+@admin_router.delete("/{machine_id}/completions/{worker_id}")
+def admin_require_retake(
+    machine_id: str,
+    worker_id: str,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Clears a worker's completion for this machine's briefing, so they show
+    up as "required" again on their Safety hub and must go through the
+    steps once more (e.g. after a safety measure changed materially).
+    Does not touch the measures themselves or any other worker's record.
+    """
+    completion = (
+        db.query(SafetyCompletion)
+        .filter(
+            SafetyCompletion.machine_id == machine_id,
+            SafetyCompletion.worker_id == worker_id,
+        )
+        .first()
+    )
+    if not completion:
+        raise HTTPException(
+            status_code=404,
+            detail="This worker hasn't completed this briefing.",
+        )
+
+    db.delete(completion)
+    db.commit()
+    return {
+        "status": "retake_required",
+        "machine_id": machine_id,
+        "worker_id": worker_id,
     }

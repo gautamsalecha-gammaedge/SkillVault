@@ -9,11 +9,23 @@ Usage:
     python setup_db.py
 """
 
+from sqlalchemy import text
 from db import engine, Base
 import models  # noqa: F401 - this import is needed so Base knows about the table definitions
 
 Base.metadata.create_all(bind=engine)
+
+# create_all only creates missing TABLES, not missing COLUMNS on tables
+# that already existed. video_url was added to safety_measures after some
+# DBs were already set up, so backfill it here too - safe to run any
+# number of times.
+with engine.begin() as conn:
+    conn.execute(text(
+        "ALTER TABLE safety_measures ADD COLUMN IF NOT EXISTS video_url VARCHAR"
+    ))
+
 print(
     "Tables created (or already existed): workers, worker_sessions, admin_sessions, "
-    "worker_machines, tickets, question_logs, interview_sessions, interview_turns""safety_measures, safety_completions"
+    "worker_machines, tickets, question_logs, interview_sessions, interview_turns, "
+    "safety_measures, safety_completions"
 )
