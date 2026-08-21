@@ -161,7 +161,7 @@ export default function KnowledgeReview() {
   });
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 780 }}>
+    <div style={{ padding: '24px 32px', maxWidth: reviewTab === 'interviews' ? 1180 : 780 }}>
       <p style={{ fontFamily: 'var(--sv-font-display)', fontWeight: 600, fontSize: 20, color: 'var(--sv-ink)' }}>Knowledge review</p>
       <p style={{ fontSize: 13, color: 'var(--sv-muted)', marginBottom: 16 }}>
         Review pending tips, or drill into a tacit knowledge interview turn by turn — one machine at a time.

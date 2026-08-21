@@ -174,6 +174,23 @@ export default function Interview() {
     URL.revokeObjectURL(url);
   }
 
+  /* Force-stops any AI audio still playing (browser TTS or the Sarvam
+     <audio> element). Called right before the mic opens as a second,
+     belt-and-suspenders line of defense against the AI's own voice
+     bleeding into the recording - see the echoCancellation comment in
+     startListening for the main fix. Also called from replayLastAiLine
+     so a manual replay never overlaps a listening mic. */
+  function stopAllPlayback() {
+    if (utteranceRef.current) {
+      try { window.speechSynthesis?.cancel(); } catch (_) {}
+      utteranceRef.current = null;
+    }
+    if (audioElRef.current) {
+      try { audioElRef.current.pause(); audioElRef.current.src = ''; } catch (_) {}
+      audioElRef.current = null;
+    }
+  }
+
   async function speakAndShow(text, langCode) {
     setStage(STAGE.AI_SPEAKING);
     pushLine('ai', text);
@@ -195,6 +212,11 @@ export default function Interview() {
      failed, let me retry" and "I just want to hear that again". */
   async function replayLastAiLine() {
     if (!lastAiLineRef.current) return;
+    // Replaying into an open mic is exactly the feedback loop that
+    // caused the AI's own question to get transcribed as the worker's
+    // answer - so this is disabled (see the button below) while
+    // listening. This early return is the belt-and-suspenders backstop.
+    if (stage === STAGE.LISTENING) return;
     const { text, langCode } = lastAiLineRef.current;
     try {
       await playSpeech(text, langCode);
@@ -237,6 +259,23 @@ export default function Interview() {
       if (res.resumed) {
         toast.push(`Welcome back — picking up where you left off on ${machineId}.`, 'info');
         forgetWorkerLine();
+        // Without this, a resumed session dropped straight into the next
+        // question with a blank thread - which read as "the test
+        // restarted" even though topic progress and insight count were
+        // both preserved server-side. Replaying the prior turns first
+        // (then a divider, then the live question) makes the continuity
+        // visible instead of just true-but-invisible. Best-effort: if
+        // the transcript fetch fails, still continue the interview.
+        try {
+          const t = await Api.interviewTranscript(res.session_id);
+          for (const turn of t.turns || []) {
+            pushLine('ai', turn.question_text);
+            pushLine('worker', turn.answer_text);
+          }
+          if (t.turns?.length) {
+            pushLine('system', `Resumed — continuing on topic ${Math.min((res.topic_index ?? 0) + 1, res.total_topics)} of ${res.total_topics}`);
+          }
+        } catch (_) { /* non-critical - the interview still resumes fine without the recap */ }
         pushLine('ai', res.current_question ? res.current_question : 'Let\u2019s continue.');
         lastAiLineRef.current = { text: res.current_question || 'Let\u2019s continue.', langCode: res.language_code || language };
         beginThinkWindow();
@@ -289,11 +328,24 @@ export default function Interview() {
 
   /* ---------------- Listening (record + live caption) ---------------- */
   async function startListening() {
+    stopAllPlayback();
+    setError('');
     setStage(STAGE.LISTENING);
     beginWorkerLine();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // echoCancellation/noiseSuppression/autoGainControl matter a lot
+      // here specifically: this screen plays the AI's question out loud
+      // and then immediately opens the mic. On a phone or laptop without
+      // headphones, an unconstrained getUserMedia({ audio: true }) picks
+      // up that same speaker output as "worker speech" - which is what
+      // produced transcripts that were actually just the AI's own
+      // question read back. These constraints ask the browser/OS to
+      // cancel that echo at the hardware/driver level instead of relying
+      // on timing alone to keep AI audio and the open mic apart.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       // The worker may have paused/ended the interview (or navigated away)
       // WHILE this permission prompt/await was pending - if so, this is a
       // stale stream nobody is going to stop otherwise. Kill it immediately
@@ -367,7 +419,7 @@ export default function Interview() {
       recorder.start();
     } catch (e) {
       if (mountedRef.current) {
-        setError('Microphone access is needed to answer. Please allow it and try again.');
+        setError('Microphone access is needed to answer by voice — please allow it and try again, or type your answer below instead.');
         setStage(STAGE.COUNTDOWN);
       }
     }
@@ -419,10 +471,19 @@ export default function Interview() {
       return;
     }
 
+    await submitAnswer(transcript, detectedLang, blob);
+  }
+
+  /* Shared tail end of "an answer is ready to go" - reached either from
+     handleRecordingStopped (after Sarvam STT) or submitTypedAnswer
+     (worker typed it directly, no STT involved). Pulled out so typing
+     an answer gets the exact same next-question/completion handling as
+     speaking one, instead of a second, easy-to-drift copy of it. */
+  async function submitAnswer(transcript, detectedLang, blob) {
     pushLine('ai', 'Got it, thinking...', true);
 
     try {
-      const res = await Api.submitInterviewAnswer(session.session_id, transcript, detectedLang, blob);
+      const res = await Api.submitInterviewAnswer(session.session_id, transcript, detectedLang, blob || null);
       if (!mountedRef.current || !activeRef.current) return;
       // Replace the "thinking" line with the real acknowledgement once resolved.
       setThread((t) => t.slice(0, -1));
@@ -448,6 +509,50 @@ export default function Interview() {
         setCountdown(THINK_SECONDS);
       }
     }
+  }
+
+  /* ---------------- Typed-answer fallback ----------------
+     A busy shop floor, a broken mic, background noise Sarvam can't cut
+     through, or a worker who's just more comfortable typing - all real
+     reasons to not force voice-only. Available any time the worker
+     would otherwise be recording. Bypasses STT entirely: the typed
+     text IS the transcript, submitted with no audio attached. */
+  const [typedMode, setTypedMode] = useState(false);
+  const [typedText, setTypedText] = useState('');
+
+  function openTypedAnswer() {
+    // Stop any in-flight recording/listening first - can't do both at once.
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      listeningRef.current = false;
+      recorderRef.current.onstop = null; // don't let the stopped recorder also fire handleRecordingStopped
+      try { recorderRef.current.stop(); } catch (_) {}
+    }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (liveCaptionRef.current) { try { liveCaptionRef.current.onend = null; liveCaptionRef.current.stop(); } catch (_) {} liveCaptionRef.current = null; }
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch (_) {} audioCtxRef.current = null; }
+    setMicLevel(0);
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    forgetWorkerLine();
+    setTypedText('');
+    setTypedMode(true);
+  }
+
+  function cancelTypedAnswer() {
+    setTypedMode(false);
+    setTypedText('');
+    beginThinkWindow();
+  }
+
+  async function submitTypedAnswer() {
+    const text = typedText.trim();
+    if (!text) return;
+    setTypedMode(false);
+    beginWorkerLine();
+    setWorkerLineText(text);
+    setStage(STAGE.THINKING);
+    await submitAnswer(text, session?.language_code || language, null);
+    setTypedText('');
   }
 
   async function handlePause() {
@@ -498,9 +603,14 @@ export default function Interview() {
             <h1 style={{ fontFamily: 'var(--sv-font-display)', fontSize: 24, margin: '0 0 8px' }}>
               Share what only you know
             </h1>
-            <p style={{ color: 'var(--iv-muted)', fontSize: 14, lineHeight: 1.6, margin: '0 0 28px' }}>
+            <p style={{ color: 'var(--iv-muted)', fontSize: 14, lineHeight: 1.6, margin: '0 0 10px' }}>
               A short spoken interview about a machine you know well. Answer in your own words —
               the AI will ask follow-ups and capture the details so this knowledge isn't lost.
+            </p>
+            <p style={{ color: 'var(--iv-muted)', fontSize: 12.5, lineHeight: 1.6, margin: '0 0 28px' }}>
+              Takes about 5–10 minutes. Nothing goes live until an admin reviews it — you can
+              pause anytime and pick up right where you left off. Headphones help the AI hear
+              you clearly if you're somewhere loud.
             </p>
           </div>
 
@@ -669,8 +779,13 @@ export default function Interview() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
             onClick={replayLastAiLine}
-            title="Replay the AI's last question"
-            style={{ background: 'none', border: 'none', color: 'var(--iv-muted)', cursor: 'pointer', display: 'flex' }}
+            disabled={stage === STAGE.LISTENING}
+            title={stage === STAGE.LISTENING ? "Can't replay while the mic is open" : "Replay the AI's last question"}
+            style={{
+              background: 'none', border: 'none', display: 'flex',
+              color: stage === STAGE.LISTENING ? 'var(--iv-panel-border)' : 'var(--iv-muted)',
+              cursor: stage === STAGE.LISTENING ? 'not-allowed' : 'pointer',
+            }}
           >
             <Volume2 size={18} />
           </button>
@@ -732,74 +847,158 @@ export default function Interview() {
 
         <span className="sv-interview__status-label">{statusLabel}</span>
 
+        {error && (
+          <div
+            style={{
+              width: '100%', maxWidth: 480, textAlign: 'center', fontSize: 13,
+              color: '#F87171', background: 'rgba(248,113,113,0.08)',
+              border: '1px solid rgba(248,113,113,0.25)', borderRadius: 10, padding: '10px 14px',
+            }}
+          >
+            {error}
+          </div>
+        )}
+
         <div className="sv-interview__thread" ref={undefined}>
-          {thread.slice(-6).map((line) => (
-            <div className="sv-interview__line" key={line.id}>
-              <span className={`sv-interview__line-tag sv-interview__line-tag--${line.speaker === 'ai' ? 'ai' : 'worker'}`}>
-                {line.speaker === 'ai' ? <Bot size={12} /> : null}
-                {line.speaker === 'ai' ? 'AI' : (workerName || 'You')}
-              </span>
-              <span className={`sv-interview__line-text${!line.text ? ' sv-interview__line-text--muted' : ''}`}>
-                {line.text || 'Listening…'}
-                {line.muted && (
-                  <span className="sv-interview__thinking-dots"><span /><span /><span /></span>
-                )}
-              </span>
-            </div>
-          ))}
+          {thread.slice(-8).map((line) =>
+            line.speaker === 'system' ? (
+              <div
+                key={line.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0',
+                  fontFamily: 'var(--sv-font-mono)', fontSize: 10, letterSpacing: '0.08em',
+                  textTransform: 'uppercase', color: 'var(--iv-muted)',
+                }}
+              >
+                <span style={{ flex: 1, height: 1, background: 'var(--iv-panel-border)' }} />
+                <History size={11} />
+                {line.text}
+                <span style={{ flex: 1, height: 1, background: 'var(--iv-panel-border)' }} />
+              </div>
+            ) : (
+              <div className="sv-interview__line" key={line.id}>
+                <span className={`sv-interview__line-tag sv-interview__line-tag--${line.speaker === 'ai' ? 'ai' : 'worker'}`}>
+                  {line.speaker === 'ai' ? <Bot size={12} /> : null}
+                  {line.speaker === 'ai' ? 'AI' : (workerName || 'You')}
+                </span>
+                <span className={`sv-interview__line-text${!line.text ? ' sv-interview__line-text--muted' : ''}`}>
+                  {line.text || 'Listening…'}
+                  {line.muted && (
+                    <span className="sv-interview__thinking-dots"><span /><span /><span /></span>
+                  )}
+                </span>
+              </div>
+            )
+          )}
         </div>
       </div>
 
       <div className="sv-interview__bottombar">
-        {stage === STAGE.COUNTDOWN && (
-          <button
-            onClick={skipCountdown}
-            style={{
-              background: 'var(--iv-brass)', color: '#1A120A', border: 'none', borderRadius: 999,
-              padding: '10px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            I'm ready
-          </button>
-        )}
-
-        {stage === STAGE.LISTENING && (
-          <>
-            <div className="sv-interview__waveform" aria-hidden="true">
-              {Array.from({ length: 16 }).map((_, i) => {
-                const jitter = Math.sin(i * 1.7 + Date.now() / 200) * 0.5 + 0.5;
-                const h = 4 + micLevel * 18 * (0.4 + 0.6 * jitter);
-                return <span key={i} style={{ height: `${h}px` }} />;
-              })}
-            </div>
-            <button
-              onClick={stopListening}
+        {typedMode ? (
+          <div style={{ width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <textarea
+              autoFocus
+              rows={3}
+              value={typedText}
+              onChange={(e) => setTypedText(e.target.value)}
+              placeholder="Type your answer…"
               style={{
-                background: 'var(--iv-teal)', color: '#04201A', border: 'none', borderRadius: 999,
-                padding: '12px 26px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 8,
+                width: '100%', background: 'var(--iv-panel)', color: 'var(--iv-ink)',
+                border: '1px solid var(--iv-brass)', borderRadius: 10, padding: 12,
+                fontSize: 14, fontFamily: 'var(--sv-font-body)', outline: 'none', resize: 'vertical',
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                onClick={cancelTypedAnswer}
+                style={{
+                  background: 'none', color: 'var(--iv-muted)', border: '1px solid var(--iv-panel-border)',
+                  borderRadius: 999, padding: '9px 18px', fontSize: 13, cursor: 'pointer',
+                }}
+              >
+                Speak instead
+              </button>
+              <button
+                onClick={submitTypedAnswer}
+                disabled={!typedText.trim()}
+                style={{
+                  background: typedText.trim() ? 'var(--iv-teal)' : 'var(--iv-panel-border)',
+                  color: typedText.trim() ? '#04201A' : 'var(--iv-muted)', border: 'none', borderRadius: 999,
+                  padding: '9px 20px', fontSize: 13, fontWeight: 600,
+                  cursor: typedText.trim() ? 'pointer' : 'not-allowed',
+                }}
+              >
+                Submit answer
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {stage === STAGE.COUNTDOWN && (
+              <>
+                <button
+                  onClick={skipCountdown}
+                  style={{
+                    background: 'var(--iv-brass)', color: '#1A120A', border: 'none', borderRadius: 999,
+                    padding: '10px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  I'm ready
+                </button>
+                <button
+                  onClick={openTypedAnswer}
+                  style={{ background: 'none', border: 'none', color: 'var(--iv-muted)', fontSize: 12, cursor: 'pointer', marginTop: 2 }}
+                >
+                  Prefer to type your answer?
+                </button>
+              </>
+            )}
+
+            {stage === STAGE.LISTENING && (
+              <>
+                <div className="sv-interview__waveform" aria-hidden="true">
+                  {Array.from({ length: 16 }).map((_, i) => {
+                    const jitter = Math.sin(i * 1.7 + Date.now() / 200) * 0.5 + 0.5;
+                    const h = 4 + micLevel * 18 * (0.4 + 0.6 * jitter);
+                    return <span key={i} style={{ height: `${h}px` }} />;
+                  })}
+                </div>
+                <button
+                  onClick={stopListening}
+                  style={{
+                    background: 'var(--iv-teal)', color: '#04201A', border: 'none', borderRadius: 999,
+                    padding: '12px 26px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}
+                >
+                  <Square size={14} fill="#04201A" /> I'm done answering
+                </button>
+                <button
+                  onClick={openTypedAnswer}
+                  style={{ background: 'none', border: 'none', color: 'var(--iv-muted)', fontSize: 12, cursor: 'pointer', marginTop: 2 }}
+                >
+                  Type instead
+                </button>
+              </>
+            )}
+
+            {(stage === STAGE.AI_SPEAKING || stage === STAGE.THINKING) && (
+              <span className="sv-interview__meta">
+                {stage === STAGE.AI_SPEAKING ? 'The AI is speaking…' : 'One moment…'}
+              </span>
+            )}
+
+            <button
+              onClick={handleEndEarly}
+              style={{
+                background: 'none', border: 'none', color: 'var(--iv-muted)', fontSize: 12,
+                cursor: 'pointer', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4,
               }}
             >
-              <Square size={14} fill="#04201A" /> I'm done answering
+              <X size={13} /> End interview now
             </button>
           </>
         )}
-
-        {(stage === STAGE.AI_SPEAKING || stage === STAGE.THINKING) && (
-          <span className="sv-interview__meta">
-            {stage === STAGE.AI_SPEAKING ? 'The AI is speaking…' : 'One moment…'}
-          </span>
-        )}
-
-        <button
-          onClick={handleEndEarly}
-          style={{
-            background: 'none', border: 'none', color: 'var(--iv-muted)', fontSize: 12,
-            cursor: 'pointer', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4,
-          }}
-        >
-          <X size={13} /> End interview now
-        </button>
       </div>
     </div>
   );

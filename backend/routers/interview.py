@@ -213,6 +213,40 @@ def get_interview(
     return _session_state(session, db)
 
 
+@router.get("/{session_id}/transcript")
+def get_interview_transcript_worker(
+    session_id: str,
+    worker: dict = Depends(require_worker),
+    db: Session = Depends(get_db),
+):
+    """Turn-by-turn transcript for the worker's OWN session. Used purely
+    to rebuild the on-screen conversation thread when resuming a
+    paused/in-progress interview - without this, resuming dropped the
+    worker straight into the next question with an empty thread, which
+    read as "starting the test over" even though the backend had kept
+    all their progress. Deliberately a smaller shape than the admin
+    transcript endpoint (no audio URLs, no knowledge/approval status -
+    a worker reviewing their own answers has no use for either)."""
+    session = _get_owned_session(session_id, worker, db)
+    turns = (
+        db.query(InterviewTurn)
+        .filter(InterviewTurn.session_id == session_id)
+        .order_by(InterviewTurn.turn_index)
+        .all()
+    )
+    return {
+        "turns": [
+            {
+                "topic_title": t.topic_title,
+                "is_followup": t.is_followup,
+                "question_text": t.question_text,
+                "answer_text": t.answer_text,
+            }
+            for t in turns
+        ]
+    }
+
+
 @router.post("/{session_id}/answer")
 async def submit_answer(
     session_id: str,
@@ -370,6 +404,30 @@ def end_interview(
 
 # ---------- Admin flow ----------
 
+def _insight_counts_by_session(machine_id: Optional[str]) -> dict:
+    """One Chroma query for every tacit-interview insight (optionally
+    scoped to a machine), grouped into per-session pending/approved/
+    rejected counts. Pulled out of list_interview_sessions and done as a
+    single bulk query - rather than one Chroma lookup per session - so
+    the sessions list doesn't get slower as the number of sessions
+    grows. Used to show admins, right in the list, which sessions
+    actually need attention instead of making them open every one."""
+    where = {"source_type": "tacit_interview"}
+    if machine_id:
+        where = {"$and": [{"source_type": "tacit_interview"}, {"machine_id": machine_id}]}
+    results = collection.get(where=where)
+    counts: dict = {}
+    for meta in results.get("metadatas", []) or []:
+        sid = meta.get("session_id")
+        if not sid:
+            continue
+        c = counts.setdefault(sid, {"pending": 0, "approved": 0, "rejected": 0})
+        status = meta.get("status", "pending")
+        if status in c:
+            c[status] += 1
+    return counts
+
+
 @admin_router.get("/interview-sessions")
 def list_interview_sessions(
     machine_id: Optional[str] = None,
@@ -386,10 +444,13 @@ def list_interview_sessions(
         query = query.filter(InterviewSession.status == status)
     sessions = query.order_by(InterviewSession.started_at.desc()).all()
 
+    insight_counts = _insight_counts_by_session(machine_id)
+
     results = []
     for s in sessions:
         worker = db.query(Worker).filter(Worker.worker_id == s.worker_id).first()
         topics = json.loads(s.topics_json)
+        counts = insight_counts.get(s.id, {"pending": 0, "approved": 0, "rejected": 0})
         results.append({
             "session_id": s.id,
             "worker_id": s.worker_id,
@@ -399,11 +460,61 @@ def list_interview_sessions(
             "topic_index": s.topic_index,
             "total_topics": len(topics),
             "insights_captured": s.insights_captured,
+            "pending_insights": counts["pending"],
+            "approved_insights": counts["approved"],
+            "rejected_insights": counts["rejected"],
             "started_at": s.started_at.isoformat() if s.started_at else None,
             "completed_at": s.completed_at.isoformat() if s.completed_at else None,
         })
 
     return {"sessions": results}
+
+
+@admin_router.post("/interview-sessions/{session_id}/approve-pending")
+def approve_session_pending(
+    session_id: str,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Approves every still-pending insight from one interview session in
+    a single call - the session-level "Approve" action. Reuses the same
+    Chroma collection /admin/approve/{id} writes to, just applied to every
+    matching entry at once instead of requiring one click per turn."""
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+
+    results = collection.get(where={"$and": [{"session_id": session_id}, {"status": "pending"}]})
+    ids = results.get("ids", [])
+    for i, entry_id in enumerate(ids):
+        meta = results["metadatas"][i]
+        meta["status"] = "approved"
+        collection.update(ids=[entry_id], metadatas=[meta])
+
+    return {"approved": len(ids)}
+
+
+@admin_router.post("/interview-sessions/{session_id}/reject-pending")
+def reject_session_pending(
+    session_id: str,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Deletes every still-pending insight from one interview session in
+    a single call - the session-level "Delete" action. The interview
+    transcript itself (InterviewSession/InterviewTurn rows) is untouched,
+    kept for the record - this only removes the distilled knowledge
+    entries from ever going live."""
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+
+    results = collection.get(where={"$and": [{"session_id": session_id}, {"status": "pending"}]})
+    ids = results.get("ids", [])
+    if ids:
+        collection.delete(ids=ids)
+
+    return {"rejected": len(ids)}
 
 
 @admin_router.get("/interview-sessions/{session_id}")

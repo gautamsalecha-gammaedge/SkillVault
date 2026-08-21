@@ -939,6 +939,77 @@
   }
 }
 
+/* ==================================================
+   ADMIN — Interview sessions table
+   A proper data table (not stacked cards) for Knowledge
+   Review's Interviews tab: worker, machine, progress,
+   review state, status, recency, and actions all
+   scannable in one glance across many rows, matching how
+   any real admin console (tickets, orders, moderation
+   queues) lays out a list of things to review.
+   ================================================== */
+
+.sv-interviews-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--sv-surface);
+  font-size: 13px;
+}
+
+.sv-interviews-table thead th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sv-muted);
+  background: var(--sv-bg-secondary);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--sv-border);
+  white-space: nowrap;
+}
+
+.sv-interviews-row td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sv-border-light);
+  vertical-align: middle;
+}
+
+.sv-interviews-row:last-child td {
+  border-bottom: none;
+}
+
+.sv-interviews-row {
+  transition: background var(--sv-transition-fast);
+}
+
+.sv-interviews-row:hover {
+  background: var(--sv-surface-hover);
+}
+
+.sv-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--sv-radius-sm);
+  border: 1px solid var(--sv-border);
+  background: var(--sv-surface);
+  cursor: pointer;
+  transition: all var(--sv-transition-fast);
+}
+
+.sv-icon-btn:hover:not(:disabled) {
+  background: var(--sv-bg-secondary);
+  transform: translateY(-1px);
+}
+
+.sv-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width: 480px) {
   .sv-interview__orb-wrap { width: 148px; height: 148px; }
   .sv-interview__stage { padding: 16px 14px; gap: 20px; }

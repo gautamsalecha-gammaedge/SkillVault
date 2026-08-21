@@ -354,6 +354,12 @@ export const Api = {
   getInterview: (session_id) =>
     apiFetch(`/interview/${encodeURIComponent(session_id)}`, { auth: 'worker' }),
 
+  /* Worker's own turn-by-turn transcript so far - used to rebuild the
+     conversation thread on resume instead of dropping back in with an
+     empty screen (see routers/interview.py get_interview_transcript_worker). */
+  interviewTranscript: (session_id) =>
+    apiFetch(`/interview/${encodeURIComponent(session_id)}/transcript`, { auth: 'worker' }),
+
   submitInterviewAnswer: (session_id, answer_text, language_code, audioBlob, onProgress) =>
     submitInterviewAnswerXhr(session_id, answer_text, language_code, audioBlob, onProgress),
 
@@ -374,6 +380,14 @@ export const Api = {
 
   adminInterviewTranscript: (session_id) =>
     apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}`, { auth: 'admin' }),
+
+  /* Session-level bulk review - approves/deletes every still-pending
+     insight from one interview in a single call, instead of forcing an
+     admin into the transcript to click Approve/Delete turn by turn. */
+  approveSessionPending: (session_id) =>
+    apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}/approve-pending`, { method: 'POST', auth: 'admin' }),
+  rejectSessionPending: (session_id) =>
+    apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}/reject-pending`, { method: 'POST', auth: 'admin' }),
 
   /* ---------------- Tickets ---------------- */
   createTicket: (data) =>
