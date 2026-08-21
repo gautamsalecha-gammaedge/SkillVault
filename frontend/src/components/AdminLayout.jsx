@@ -17,6 +17,7 @@ export default function AdminLayout() {
     { to: '/admin/workers-machines', label: 'Workers & machines' },
     { to: '/admin/knowledge-review', label: 'Knowledge review' },
     { to: '/admin/tickets', label: 'Tickets' },          // ← add this
+    { to: '/admin/safety-measures', label: 'Safety measures' },
     { to: '/admin/analytics', label: 'Analytics' },
     { to: '/admin/manuals', label: 'Manuals' },
   ];

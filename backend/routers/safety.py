@@ -73,6 +73,64 @@ def _measure_dict(m: SafetyMeasure) -> dict:
 
 # ---------- Worker endpoints ----------
 
+@router.get("/my-status")
+def my_safety_status(
+    worker: dict = Depends(require_worker),
+    db: Session = Depends(get_db),
+):
+    """
+    One-call dashboard feed: for every machine this worker is assigned,
+    how many active safety measures exist and whether the briefing has
+    been completed. Powers the Safety hub screen without an N+1 fetch
+    per machine. Must be declared before GET /{machine_id} so it isn't
+    swallowed by that path parameter.
+    """
+    assignments = (
+        db.query(WorkerMachine)
+        .filter(WorkerMachine.worker_id == worker["worker_id"])
+        .all()
+    )
+    machine_ids = [a.machine_id for a in assignments]
+
+    if not machine_ids:
+        return {"machines": []}
+
+    measure_counts: dict[str, int] = {}
+    for row in (
+        db.query(SafetyMeasure.machine_id, SafetyMeasure.id)
+        .filter(
+            SafetyMeasure.machine_id.in_(machine_ids),
+            SafetyMeasure.is_active == True,
+        )
+        .all()
+    ):
+        measure_counts[row[0]] = measure_counts.get(row[0], 0) + 1
+
+    completions = {
+        c.machine_id: c
+        for c in (
+            db.query(SafetyCompletion)
+            .filter(
+                SafetyCompletion.worker_id == worker["worker_id"],
+                SafetyCompletion.machine_id.in_(machine_ids),
+            )
+            .all()
+        )
+    }
+
+    results = []
+    for mid in machine_ids:
+        completion = completions.get(mid)
+        results.append({
+            "machine_id": mid,
+            "measure_count": measure_counts.get(mid, 0),
+            "completed": completion is not None,
+            "completed_at": completion.completed_at if completion else None,
+        })
+
+    return {"machines": results}
+
+
 @router.get("/{machine_id}")
 def get_safety_measures(
     machine_id: str,

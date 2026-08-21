@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { MessageCircle, PlusCircle, ListChecks, Radio, Settings, Ticket, Sparkles } from 'lucide-react';
+import { MessageCircle, PlusCircle, ListChecks, Radio, Settings, Ticket, Sparkles, ShieldCheck } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 
 /**
@@ -12,6 +12,7 @@ export default function WorkerNav() {
 
   const TABS = [
     { to: '/worker/ask', label: t('askAbout'), icon: MessageCircle },
+    { to: '/worker/safety', label: t('safetyTitle'), icon: ShieldCheck },
     { to: '/worker/add-tip', label: t('addTipFor'), icon: PlusCircle },
     { to: '/worker/my-tips', label: t('myTipsTitle'), icon: ListChecks },
     { to: '/worker/raise-ticket', label: 'Raise Ticket', icon: Ticket },

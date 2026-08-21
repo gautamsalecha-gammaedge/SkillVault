@@ -389,6 +389,50 @@ export const Api = {
   rejectSessionPending: (session_id) =>
     apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}/reject-pending`, { method: 'POST', auth: 'admin' }),
 
+  /* ---------------- Machine Safety Measures ----------------
+     Worker briefing flow: mySafetyStatus feeds the Safety hub grid
+     (one call, one badge per assigned machine); safetyMeasures loads
+     the ordered text+audio steps for one machine; completeSafety marks
+     the briefing done (idempotent — re-completing just refreshes the
+     timestamp, used for periodic refreshers). */
+  mySafetyStatus: () => apiFetch('/safety/my-status', { auth: 'worker' }),
+
+  safetyMeasures: (machine_id) =>
+    apiFetch(`/safety/${encodeURIComponent(machine_id)}`, { auth: 'worker' }),
+
+  safetyStatus: (machine_id) =>
+    apiFetch(`/safety/${encodeURIComponent(machine_id)}/status`, { auth: 'worker' }),
+
+  completeSafety: (machine_id, language_code) =>
+    apiFetch(`/safety/${encodeURIComponent(machine_id)}/complete`, {
+      method: 'POST',
+      auth: 'worker',
+      body: { language_code },
+    }),
+
+  /* Admin — CRUD + reorder + who's-completed, for the Safety Measures
+     management screen. */
+  adminSafetyMeasures: (machine_id) =>
+    apiFetch(`/admin/safety/${encodeURIComponent(machine_id)}`, { auth: 'admin' }),
+
+  createSafetyMeasure: (data) =>
+    apiFetch('/admin/safety', { method: 'POST', auth: 'admin', body: data }),
+
+  updateSafetyMeasure: (id, data) =>
+    apiFetch(`/admin/safety/${encodeURIComponent(id)}`, { method: 'PUT', auth: 'admin', body: data }),
+
+  deleteSafetyMeasure: (id, hard = false) =>
+    apiFetch(`/admin/safety/${encodeURIComponent(id)}${hard ? '?hard=true' : ''}`, {
+      method: 'DELETE',
+      auth: 'admin',
+    }),
+
+  reorderSafetyMeasures: (items) =>
+    apiFetch('/admin/safety/reorder', { method: 'POST', auth: 'admin', body: { items } }),
+
+  safetyCompletions: (machine_id) =>
+    apiFetch(`/admin/safety/${encodeURIComponent(machine_id)}/completions`, { auth: 'admin' }),
+
   /* ---------------- Tickets ---------------- */
   createTicket: (data) =>
     apiFetch('/tickets', { method: 'POST', auth: 'worker', body: data }),

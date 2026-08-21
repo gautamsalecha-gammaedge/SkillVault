@@ -12,6 +12,8 @@ import HandsFree from './pages/worker/HandsFree';
 import Interview from './pages/worker/Interview';
 import Notifications from './pages/worker/Notifications';
 import Settings from './pages/worker/Settings';
+import Safety from './pages/worker/Safety';
+import SafetyBriefing from './pages/worker/SafetyBriefing';
 
 import PendingWorkers from './pages/admin/PendingWorkers';
 import WorkersMachines from './pages/admin/WorkersMachines';
@@ -21,6 +23,7 @@ import Manuals from './pages/admin/Manuals';
 import RaiseTicket from './pages/worker/RaiseTicket';
 import MyTickets from './pages/worker/MyTickets';
 import Tickets from './pages/admin/Tickets';
+import SafetyMeasures from './pages/admin/SafetyMeasures';
 export default function App() {
   return (
     <Routes>
@@ -32,6 +35,8 @@ export default function App() {
       >
         <Route index element={<Navigate to="ask" replace />} />
         <Route path="ask" element={<Ask />} />
+        <Route path="safety" element={<Safety />} />
+        <Route path="safety/:machineId" element={<SafetyBriefing />} />
         <Route path="add-tip" element={<AddTip />} />
         <Route path="my-tips" element={<MyTips />} />
         <Route path="hands-free" element={<HandsFree />} />
@@ -54,6 +59,7 @@ export default function App() {
         <Route path="analytics" element={<Analytics />} />
         <Route path="manuals" element={<Manuals />} />
         <Route path="tickets" element={<Tickets />} />
+        <Route path="safety-measures" element={<SafetyMeasures />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
