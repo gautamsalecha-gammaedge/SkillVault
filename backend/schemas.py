@@ -65,6 +65,11 @@ class EditEntryRequest(BaseModel):
 class StartInterviewRequest(BaseModel):
     machine_id: str
     language_code: str = "en-IN"
+    # If true, any existing in_progress/paused session for this worker+
+    # machine is abandoned and a brand-new one is created instead of
+    # resuming it. Set when the worker explicitly chooses "Start fresh"
+    # after being shown a resume/fresh choice (see GET /interview/check).
+    fresh: bool = False
     # language_code is the worker's preferred spoken language, picked
     # before the interview starts (unlike Add Tip, where it's detected
     # from the first recording) - since the opening question itself

@@ -341,8 +341,15 @@ export const Api = {
      Worker flow: startInterview covers both "start" and "resume" - the
      backend detects an existing in_progress/paused session for this
      worker+machine and resumes it instead of creating a duplicate. */
-  startInterview: (machine_id, language_code) =>
-    apiFetch('/interview/start', { method: 'POST', auth: 'worker', body: { machine_id, language_code } }),
+  startInterview: (machine_id, language_code, fresh = false) =>
+    apiFetch('/interview/start', { method: 'POST', auth: 'worker', body: { machine_id, language_code, fresh } }),
+
+  /* Read-only - checks whether a resumable (in_progress/paused) session
+     already exists for this machine, so the UI can ask "continue or
+     start fresh" BEFORE calling startInterview (which would otherwise
+     resume silently). */
+  checkInterview: (machine_id) =>
+    apiFetch(`/interview/check?machine_id=${encodeURIComponent(machine_id)}`, { auth: 'worker' }),
 
   getInterview: (session_id) =>
     apiFetch(`/interview/${encodeURIComponent(session_id)}`, { auth: 'worker' }),

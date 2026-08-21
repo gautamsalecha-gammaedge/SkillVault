@@ -5,8 +5,14 @@ import { Api, mediaUrl } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 
 function SessionRow({ s, onOpen }) {
-  const statusLabel = s.status === 'completed' ? 'Completed' : s.status === 'paused' ? 'Paused' : 'In progress';
-  const statusColor = s.status === 'completed' ? 'var(--sv-teal)' : s.status === 'paused' ? 'var(--sv-muted)' : 'var(--sv-brass)';
+  const statusLabel =
+    s.status === 'completed' ? 'Completed' :
+    s.status === 'paused' ? 'Paused' :
+    s.status === 'abandoned' ? 'Abandoned (restarted)' : 'In progress';
+  const statusColor =
+    s.status === 'completed' ? 'var(--sv-teal)' :
+    s.status === 'paused' ? 'var(--sv-muted)' :
+    s.status === 'abandoned' ? 'var(--sv-muted)' : 'var(--sv-brass)';
   return (
     <button
       onClick={() => onOpen(s.session_id)}
@@ -91,7 +97,7 @@ function TranscriptView({ sessionId, onBack }) {
           {data.worker_name} · {data.machine_id}
         </p>
         <p style={{ fontSize: 12, color: 'var(--sv-muted)', margin: 0 }}>
-          {data.status === 'completed' ? 'Completed' : data.status === 'paused' ? 'Paused' : 'In progress'} ·{' '}
+          {data.status === 'completed' ? 'Completed' : data.status === 'paused' ? 'Paused' : data.status === 'abandoned' ? 'Abandoned (restarted)' : 'In progress'} ·{' '}
           {data.turns.length} turn{data.turns.length === 1 ? '' : 's'}
         </p>
       </div>
@@ -112,6 +118,11 @@ function TranscriptView({ sessionId, onBack }) {
             </p>
             {t.answer_audio_url && (
               <audio controls src={mediaUrl(t.answer_audio_url)} style={{ width: '100%', height: 32, marginBottom: 10 }} />
+            )}
+            {!t.knowledge_status && (
+              <p style={{ fontSize: 11, color: 'var(--sv-muted-light)', margin: '4px 0 0', fontStyle: 'italic' }}>
+                No insight was distilled from this answer — nothing to approve here.
+              </p>
             )}
             {t.knowledge_status && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid var(--sv-border-light)' }}>

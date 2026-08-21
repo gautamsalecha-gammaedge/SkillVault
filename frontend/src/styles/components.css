@@ -670,6 +670,30 @@
   display: flex;
   flex-direction: column;
   font-family: var(--sv-font-body);
+  /* This screen is always dark regardless of the app-wide light/dark
+     toggle (see --iv-* vars above). Without telling the browser that,
+     native form controls inside it - specifically the OPEN dropdown
+     list of a <select> - still render with the OS/browser's default
+     light popup, and since the select's own CSS sets near-white text
+     for the closed box, that text becomes white-on-white and invisible
+     the moment the list opens. color-scheme is the standard fix: it
+     tells the browser to draw native widgets in this subtree (select
+     popups, checkboxes, scrollbars) using dark-appropriate colors. */
+  color-scheme: dark;
+}
+
+/* Plain (non-MachineSelect) <select> elements inside the interview
+   screen - e.g. the language picker on the setup screen. Needs an
+   OPAQUE background: some browsers still won't apply a translucent
+   background to the native option list even with color-scheme set,
+   which is what made the dropdown look blank. */
+.sv-interview select {
+  background-color: var(--iv-bg-2) !important;
+  color-scheme: dark;
+}
+.sv-interview select option {
+  background-color: var(--iv-bg-2);
+  color: var(--iv-ink);
 }
 
 .sv-interview__topbar {
@@ -837,6 +861,9 @@
 
 .sv-interview__line-tag {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: var(--sv-font-mono);
   font-size: 10px;
   letter-spacing: 0.08em;

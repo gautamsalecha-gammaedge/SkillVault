@@ -106,6 +106,38 @@ def _get_owned_session(session_id: str, worker: dict, db: Session) -> InterviewS
 
 # ---------- Worker flow ----------
 
+@router.get("/check")
+def check_resumable_interview(
+    machine_id: str,
+    worker: dict = Depends(require_worker),
+    db: Session = Depends(get_db),
+):
+    """
+    Read-only lookup for whether this worker has an in_progress/paused
+    session for this machine already - used by the frontend to show a
+    "Continue where you left off" vs "Start fresh" choice BEFORE calling
+    /start, instead of /start silently resuming without asking. Does
+    not mutate anything.
+    """
+    existing = db.query(InterviewSession).filter(
+        InterviewSession.worker_id == worker["worker_id"],
+        InterviewSession.machine_id == machine_id,
+        InterviewSession.status.in_(["in_progress", "paused"]),
+    ).first()
+
+    if not existing:
+        return {"resumable": False}
+
+    topics = json.loads(existing.topics_json)
+    return {
+        "resumable": True,
+        "topic_index": existing.topic_index,
+        "total_topics": len(topics),
+        "insights_captured": existing.insights_captured,
+        "last_activity_at": existing.last_activity_at.isoformat() if existing.last_activity_at else None,
+    }
+
+
 @router.post("/start")
 def start_interview(
     req: StartInterviewRequest,
@@ -119,6 +151,11 @@ def start_interview(
     both "start" and "resume" so the frontend doesn't need to check
     first: it can always call /start on page load and get back whatever
     state is correct (fresh or resumed).
+
+    req.fresh=True skips resuming: the existing session is marked
+    "abandoned" (kept for the record, just no longer active/resumable)
+    and a brand-new session is created instead. Used when the worker is
+    shown a resume/fresh choice (GET /interview/check) and picks fresh.
     """
     assigned = db.query(WorkerMachine).filter(
         WorkerMachine.worker_id == worker["worker_id"],
@@ -133,11 +170,16 @@ def start_interview(
         InterviewSession.status.in_(["in_progress", "paused"]),
     ).first()
 
-    if existing:
+    if existing and not req.fresh:
         existing.status = "in_progress"
         existing.last_activity_at = datetime.utcnow()
         db.commit()
         return {"resumed": True, **_session_state(existing, db)}
+
+    if existing and req.fresh:
+        existing.status = "abandoned"
+        existing.last_activity_at = datetime.utcnow()
+        db.commit()
 
     topics = generate_topic_bank(req.machine_id)
     session = InterviewSession(

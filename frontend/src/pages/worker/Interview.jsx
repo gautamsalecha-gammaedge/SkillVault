@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Mic, Square, PauseCircle, X, Sparkles } from 'lucide-react';
+import { Mic, Square, PauseCircle, X, Sparkles, Bot, Volume2, History } from 'lucide-react';
 import { Api, mediaUrl } from '../../lib/api';
 import { getWorkerName } from '../../lib/auth';
 import { LANGUAGES, getLanguage, setLanguage } from '../../lib/languages';
@@ -17,6 +17,7 @@ const THINK_SECONDS = 10;
    never drift apart. */
 const STAGE = {
   SETUP: 'setup',
+  RESUME_CHOICE: 'resume_choice', // resumable session found - ask continue vs fresh
   AI_SPEAKING: 'ai_speaking',
   COUNTDOWN: 'countdown',
   LISTENING: 'listening',
@@ -40,15 +41,22 @@ export default function Interview() {
   const [micLevel, setMicLevel] = useState(0); // 0..1, drives the waveform
   const [error, setError] = useState('');
   const [insightsToast, setInsightsToast] = useState(0);
+  const [resumeInfo, setResumeInfo] = useState(null); // { topic_index, total_topics, insights_captured, ... }
 
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
   const analyserRef = useRef(null);
+  const audioCtxRef = useRef(null); // the Web Audio context behind the mic-level meter - closed on cleanup so contexts don't pile up across turns
   const rafRef = useRef(null);
   const countdownTimerRef = useRef(null);
   const audioElRef = useRef(null);
   const liveCaptionRef = useRef(null); // browser SpeechRecognition, display-only
+  const listeningRef = useRef(false); // true only while we WANT the live caption running - lets onend know whether to auto-restart after a silence timeout vs a real stop
+  const workerLineIdRef = useRef(null); // id of the single thread line for the answer currently being recorded/retried, so retries update it in place instead of stacking new lines
+  const mountedRef = useRef(true); // guards async callbacks (STT/TTS/submit) from touching state or toasting after the worker has navigated away
+  const activeRef = useRef(false); // true only while an interview is actually meant to be running - separate from mountedRef, because pausing/ending doesn't unmount the page, it just leaves the flow. Without this, a getUserMedia() call still in flight when "End interview now" is clicked resolves AFTER cleanup already ran, hands back a live mic stream nothing ever stops, and that's what left the browser's mic-in-use indicator on.
+  const lastAiLineRef = useRef(null); // { text, langCode } for the most recent AI line, so it can be replayed manually if TTS failed or the worker just wants to hear it again
 
   useEffect(() => {
     Api.myMachines()
@@ -61,14 +69,38 @@ export default function Interview() {
       .finally(() => setLoadingMachines(false));
   }, []);
 
-  useEffect(() => () => cleanupAudioLoop(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cleanupAudioLoop();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function cleanupAudioLoop() {
+    activeRef.current = false;
+    listeningRef.current = false; // stop the SpeechRecognition onend handler from auto-restarting
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
-    if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    // Stop the recorder itself (not just the tracks) so nothing is left
+    // mid-recording - leaving this out is what let the browser's mic-in-use
+    // indicator (and, transitively, its permission state) stay lit after
+    // navigating away from an in-progress answer.
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      try { recorderRef.current.ondataavailable = null; recorderRef.current.onstop = null; recorderRef.current.stop(); } catch (_) {}
+    }
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch (_) {}
+      audioCtxRef.current = null;
+    }
     if (liveCaptionRef.current) {
-      try { liveCaptionRef.current.stop(); } catch (_) {}
+      try { liveCaptionRef.current.onend = null; liveCaptionRef.current.onerror = null; liveCaptionRef.current.stop(); } catch (_) {}
+      liveCaptionRef.current = null;
+    }
+    if (audioElRef.current) {
+      try { audioElRef.current.pause(); audioElRef.current.src = ''; } catch (_) {}
+      audioElRef.current = null;
     }
   }
 
@@ -76,25 +108,41 @@ export default function Interview() {
     setThread((t) => [...t, { id: `${Date.now()}-${Math.random()}`, speaker, text, muted }]);
   }
 
-  function updateLastLine(speaker, text) {
-    setThread((t) => {
-      const copy = [...t];
-      for (let i = copy.length - 1; i >= 0; i--) {
-        if (copy[i].speaker === speaker) {
-          copy[i] = { ...copy[i], text };
-          return copy;
-        }
-      }
-      return [...t, { id: `${Date.now()}-${Math.random()}`, speaker, text }];
-    });
+  /* Every fresh question resets which thread line the worker's answer
+     (and any retries of it) should land on - see beginWorkerLine. */
+  function forgetWorkerLine() {
+    workerLineIdRef.current = null;
+  }
+
+  /* Starts (or, on a retry after a failed transcription, REUSES) the one
+     thread line that represents the current answer attempt. Previously
+     this was a plain pushLine on every call, so each retry after a
+     "Could not transcribe" left the old failed line in place AND added a
+     new one underneath it, stacking up duplicate lines - see the bug
+     report. Now there's exactly one line per question, updated in place. */
+  function beginWorkerLine() {
+    if (workerLineIdRef.current) {
+      setWorkerLineText('');
+      return;
+    }
+    const id = `${Date.now()}-${Math.random()}`;
+    workerLineIdRef.current = id;
+    setThread((t) => [...t, { id, speaker: 'worker', text: '' }]);
+  }
+
+  function setWorkerLineText(text) {
+    setThread((t) => t.map((l) => (l.id === workerLineIdRef.current ? { ...l, text } : l)));
   }
 
   /* ---------------- TTS playback for AI lines ---------------- */
   async function speakAndShow(text, langCode) {
     setStage(STAGE.AI_SPEAKING);
     pushLine('ai', text);
+    forgetWorkerLine();
+    lastAiLineRef.current = { text, langCode };
     try {
       const blob = await Api.speak(text, langCode);
+      if (!mountedRef.current) return;
       const url = URL.createObjectURL(blob);
       await new Promise((resolve) => {
         const audio = new Audio(url);
@@ -104,9 +152,32 @@ export default function Interview() {
         audio.play().catch(resolve);
       });
       URL.revokeObjectURL(url);
-    } catch (_) {
-      // TTS failed - the text is already on screen, so the flow can continue
-      // without audio rather than getting stuck.
+    } catch (e) {
+      // TTS failed - the text is already on screen, so the flow can
+      // continue without audio rather than getting stuck. Surface it
+      // (once, not per-turn-spam) instead of silently swallowing it, so
+      // a real backend/TTS problem is visible instead of looking like
+      // the AI simply doesn't talk.
+      if (mountedRef.current) toast.push('Could not play audio for that question — reading it is still fine. Tap the speaker icon to retry.', 'error');
+    }
+  }
+
+  /* Lets the worker manually replay the last AI line - covers both "TTS
+     failed, let me retry" and "I just want to hear that again". */
+  async function replayLastAiLine() {
+    if (!lastAiLineRef.current) return;
+    const { text, langCode } = lastAiLineRef.current;
+    try {
+      const blob = await Api.speak(text, langCode);
+      if (!mountedRef.current) return;
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioElRef.current = audio;
+      audio.onended = () => URL.revokeObjectURL(url);
+      audio.onerror = () => URL.revokeObjectURL(url);
+      audio.play().catch(() => {});
+    } catch (e) {
+      toast.push('Still could not play audio. Check your connection and try again.', 'error');
     }
   }
 
@@ -116,19 +187,51 @@ export default function Interview() {
     setLanguage(language);
     setError('');
     setThread([]);
+    forgetWorkerLine();
     try {
-      const res = await Api.startInterview(machineId, language);
+      const check = await Api.checkInterview(machineId);
+      if (!mountedRef.current) return;
+      if (check.resumable) {
+        setResumeInfo(check);
+        setStage(STAGE.RESUME_CHOICE);
+        return;
+      }
+      await launchInterview(false);
+    } catch (e) {
+      // If the check itself fails, don't block the worker from starting -
+      // fall through to a normal start, which still resumes server-side
+      // if something's there.
+      await launchInterview(false);
+    }
+  }
+
+  async function launchInterview(fresh) {
+    setError('');
+    try {
+      const res = await Api.startInterview(machineId, language, fresh);
+      if (!mountedRef.current) return;
+      activeRef.current = true;
       setSession(res);
       if (res.resumed) {
         toast.push(`Welcome back — picking up where you left off on ${machineId}.`, 'info');
+        forgetWorkerLine();
         pushLine('ai', res.current_question ? res.current_question : 'Let\u2019s continue.');
+        lastAiLineRef.current = { text: res.current_question || 'Let\u2019s continue.', langCode: res.language_code || language };
         beginThinkWindow();
       } else {
         await runNextQuestion(res, res.current_question, true);
       }
     } catch (e) {
-      setError(e.message || 'Could not start the interview.');
+      if (mountedRef.current) setError(e.message || 'Could not start the interview.');
     }
+  }
+
+  function handleContinue() {
+    launchInterview(false);
+  }
+
+  function handleStartFresh() {
+    launchInterview(true);
   }
 
   async function runNextQuestion(sess, questionText, isFirst = false) {
@@ -165,16 +268,22 @@ export default function Interview() {
   /* ---------------- Listening (record + live caption) ---------------- */
   async function startListening() {
     setStage(STAGE.LISTENING);
-    pushLine('worker', '', false);
+    beginWorkerLine();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // The worker may have paused/ended the interview (or navigated away)
+      // WHILE this permission prompt/await was pending - if so, this is a
+      // stale stream nobody is going to stop otherwise. Kill it immediately
+      // instead of wiring it up.
+      if (!mountedRef.current || !activeRef.current) { stream.getTracks().forEach((t) => t.stop()); return; }
       streamRef.current = stream;
 
       // Mic level meter for the waveform, purely visual.
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (AudioContext) {
         const ctx = new AudioContext();
+        audioCtxRef.current = ctx;
         const source = ctx.createMediaStreamSource(stream);
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 256;
@@ -194,19 +303,38 @@ export default function Interview() {
       // (if available) - purely cosmetic so the worker sees words appear
       // as they talk. The authoritative transcript still comes from
       // Sarvam STT (Api.transcribe) once recording stops.
+      //
+      // Chrome (and most engines) silently end the recognition session
+      // after a few seconds of silence, even with continuous=true - if
+      // a worker pauses for a beat mid-answer, `onend` fires and the
+      // caption just stops updating even though the mic (and the actual
+      // MediaRecorder audio) is still fine. Restarting on `onend` (while
+      // still in the listening stage) is what makes a mid-answer pause
+      // not look broken.
       const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRec) {
-        const rec = new SpeechRec();
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.onresult = (e) => {
-          let text = '';
-          for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
-          updateLastLine('worker', text);
+        listeningRef.current = true;
+        const startRecognition = () => {
+          const rec = new SpeechRec();
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.onresult = (e) => {
+            let text = '';
+            for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+            setWorkerLineText(text);
+          };
+          // 'no-speech' just means it timed out waiting - not a real
+          // error, `onend` (below) handles restarting it either way.
+          rec.onerror = () => {};
+          rec.onend = () => {
+            if (listeningRef.current) {
+              try { rec.start(); } catch (_) { setTimeout(startRecognition, 300); }
+            }
+          };
+          try { rec.start(); } catch (_) {}
+          liveCaptionRef.current = rec;
         };
-        rec.onerror = () => {};
-        try { rec.start(); } catch (_) {}
-        liveCaptionRef.current = rec;
+        startRecognition();
       }
 
       const recorder = new MediaRecorder(stream);
@@ -216,37 +344,56 @@ export default function Interview() {
       recorderRef.current = recorder;
       recorder.start();
     } catch (e) {
-      setError('Microphone access is needed to answer. Please allow it and try again.');
-      setStage(STAGE.COUNTDOWN);
+      if (mountedRef.current) {
+        setError('Microphone access is needed to answer. Please allow it and try again.');
+        setStage(STAGE.COUNTDOWN);
+      }
     }
   }
 
   function stopListening() {
+    listeningRef.current = false; // tell the live-caption onend handler not to restart
     if (recorderRef.current && recorderRef.current.state !== 'inactive') {
       recorderRef.current.stop();
     }
   }
 
   async function handleRecordingStopped() {
+    listeningRef.current = false;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     setMicLevel(0);
-    if (liveCaptionRef.current) { try { liveCaptionRef.current.stop(); } catch (_) {} liveCaptionRef.current = null; }
+    if (liveCaptionRef.current) { try { liveCaptionRef.current.onend = null; liveCaptionRef.current.stop(); } catch (_) {} liveCaptionRef.current = null; }
     if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch (_) {} audioCtxRef.current = null; }
+    if (!mountedRef.current || !activeRef.current) return; // worker paused/ended while this recording was wrapping up
 
     setStage(STAGE.THINKING);
     const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+
+    // A near-empty recording (worker tapped stop almost immediately, or
+    // the mic never actually picked anything up) is worth catching
+    // client-side with a clear message, rather than sending it to Sarvam
+    // and getting back the more generic "couldn't hear anything".
+    if (blob.size < 2000) {
+      setWorkerLineText('(No speech detected — try answering again)');
+      if (mountedRef.current) { setStage(STAGE.COUNTDOWN); setCountdown(THINK_SECONDS); }
+      return;
+    }
 
     let transcript = '';
     let detectedLang = session?.language_code || language;
     try {
       const sttRes = await Api.transcribe(blob);
+      if (!mountedRef.current || !activeRef.current) return;
       transcript = sttRes.transcript || '';
       detectedLang = sttRes.language_code || detectedLang;
-      updateLastLine('worker', transcript || '(No speech detected)');
+      setWorkerLineText(transcript || '(No speech detected)');
     } catch (e) {
-      updateLastLine('worker', '(Could not transcribe — try answering again)');
-      setStage(STAGE.COUNTDOWN);
-      setCountdown(THINK_SECONDS);
+      if (mountedRef.current) {
+        setWorkerLineText('(Could not transcribe — try answering again)');
+        setStage(STAGE.COUNTDOWN);
+        setCountdown(THINK_SECONDS);
+      }
       return;
     }
 
@@ -254,25 +401,30 @@ export default function Interview() {
 
     try {
       const res = await Api.submitInterviewAnswer(session.session_id, transcript, detectedLang, blob);
+      if (!mountedRef.current || !activeRef.current) return;
       // Replace the "thinking" line with the real acknowledgement once resolved.
       setThread((t) => t.slice(0, -1));
       setSession(res);
+      forgetWorkerLine();
       if (res.insight_captured) setInsightsToast((n) => n + 1);
 
       const ack = res.acknowledgement ? `${res.acknowledgement} ` : '';
       if (res.completed) {
         await speakAndShow(ack || 'That\u2019s everything for this session — thank you.', res.language_code);
-        setStage(STAGE.DONE);
+        activeRef.current = false;
+        if (mountedRef.current) setStage(STAGE.DONE);
       } else {
         const nextQ = res.current_question;
         await speakAndShow(`${ack}${nextQ}`.trim(), res.language_code);
-        beginThinkWindow();
+        if (mountedRef.current) beginThinkWindow();
       }
     } catch (e) {
-      setThread((t) => t.slice(0, -1));
-      setError(e.message || 'Could not submit your answer. Please try again.');
-      setStage(STAGE.COUNTDOWN);
-      setCountdown(THINK_SECONDS);
+      if (mountedRef.current) {
+        setThread((t) => t.slice(0, -1));
+        setError(e.message || 'Could not submit your answer. Please try again.');
+        setStage(STAGE.COUNTDOWN);
+        setCountdown(THINK_SECONDS);
+      }
     }
   }
 
@@ -282,9 +434,11 @@ export default function Interview() {
     if (session?.session_id) {
       try { await Api.pauseInterview(session.session_id); } catch (_) {}
     }
-    toast.push('Interview paused — pick up right where you left off next time.', 'info');
+    if (mountedRef.current) toast.push('Interview paused — pick up right where you left off next time.', 'info');
     setSession(null);
-    setStage(STAGE.SETUP);
+    setResumeInfo(null);
+    forgetWorkerLine();
+    if (mountedRef.current) setStage(STAGE.SETUP);
   }
 
   async function handleEndEarly() {
@@ -299,6 +453,9 @@ export default function Interview() {
   function handleRestart() {
     setSession(null);
     setThread([]);
+    setResumeInfo(null);
+    setError('');
+    forgetWorkerLine();
     setStage(STAGE.SETUP);
   }
 
@@ -359,6 +516,60 @@ export default function Interview() {
                 {error && <span style={{ color: '#F87171', fontSize: 13, textAlign: 'center' }}>{error}</span>}
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (stage === STAGE.RESUME_CHOICE) {
+    const ri = resumeInfo || {};
+    return (
+      <div className="sv-interview" style={{ justifyContent: 'center' }}>
+        <div className="sv-interview__stage">
+          <div style={{
+            width: 56, height: 56, borderRadius: '50%', margin: '0 auto 4px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'linear-gradient(160deg, rgba(212,145,92,0.25), rgba(212,145,92,0.05))',
+            border: '1px solid rgba(212,145,92,0.3)',
+          }}>
+            <History size={24} color="var(--iv-brass)" />
+          </div>
+          <div style={{ textAlign: 'center', maxWidth: 380 }}>
+            <h1 style={{ fontFamily: 'var(--sv-font-display)', fontSize: 22, margin: '0 0 8px' }}>
+              You've already started this one
+            </h1>
+            <p style={{ color: 'var(--iv-muted)', fontSize: 14, lineHeight: 1.6, margin: 0 }}>
+              You're on topic {Math.min((ri.topic_index ?? 0) + 1, ri.total_topics ?? 1)} of {ri.total_topics ?? '?'} for{' '}
+              <strong style={{ color: 'var(--iv-ink)' }}>{machineId}</strong>, with {ri.insights_captured ?? 0} insight
+              {(ri.insights_captured ?? 0) === 1 ? '' : 's'} captured so far.
+            </p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 320 }}>
+            <button
+              onClick={handleContinue}
+              style={{
+                background: 'var(--iv-brass)', color: '#1A120A', border: 'none',
+                borderRadius: 12, padding: '14px 20px', fontSize: 15, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Continue where I left off
+            </button>
+            <button
+              onClick={handleStartFresh}
+              style={{
+                background: 'var(--iv-panel)', color: 'var(--iv-ink)', border: '1px solid var(--iv-panel-border)',
+                borderRadius: 12, padding: '14px 20px', fontSize: 15, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Start a fresh interview
+            </button>
+            <button
+              onClick={() => setStage(STAGE.SETUP)}
+              style={{ background: 'none', border: 'none', color: 'var(--iv-muted)', fontSize: 13, cursor: 'pointer', marginTop: 2 }}
+            >
+              Back
+            </button>
           </div>
         </div>
       </div>
@@ -433,13 +644,22 @@ export default function Interview() {
         <span className="sv-interview__meta">
           {workerName} · {machineId} · Topic {Math.min(topicIndex + 1, totalTopics)}/{totalTopics}
         </span>
-        <button
-          onClick={handlePause}
-          title="Pause interview"
-          style={{ background: 'none', border: 'none', color: 'var(--iv-muted)', cursor: 'pointer', display: 'flex' }}
-        >
-          <PauseCircle size={20} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={replayLastAiLine}
+            title="Replay the AI's last question"
+            style={{ background: 'none', border: 'none', color: 'var(--iv-muted)', cursor: 'pointer', display: 'flex' }}
+          >
+            <Volume2 size={18} />
+          </button>
+          <button
+            onClick={handlePause}
+            title="Pause interview"
+            style={{ background: 'none', border: 'none', color: 'var(--iv-muted)', cursor: 'pointer', display: 'flex' }}
+          >
+            <PauseCircle size={20} />
+          </button>
+        </div>
       </div>
 
       <div className="sv-interview__stage">
@@ -476,6 +696,11 @@ export default function Interview() {
                 <span style={{ fontFamily: 'var(--sv-font-mono)', fontSize: 28, color: 'var(--iv-brass)' }}>
                   {countdown}
                 </span>
+              ) : orbState === 'speaking' ? (
+                // The AI's avatar - previously this was the same mic icon
+                // used for the worker's own turn, so there was nothing on
+                // screen that actually read as "the AI", just a color change.
+                <Bot size={24} color="var(--iv-brass)" />
               ) : (
                 <Mic size={22} color={orbState === 'listening' ? 'var(--iv-teal)' : 'var(--iv-brass)'} />
               )}
@@ -489,6 +714,7 @@ export default function Interview() {
           {thread.slice(-6).map((line) => (
             <div className="sv-interview__line" key={line.id}>
               <span className={`sv-interview__line-tag sv-interview__line-tag--${line.speaker === 'ai' ? 'ai' : 'worker'}`}>
+                {line.speaker === 'ai' ? <Bot size={12} /> : null}
                 {line.speaker === 'ai' ? 'AI' : (workerName || 'You')}
               </span>
               <span className={`sv-interview__line-text${!line.text ? ' sv-interview__line-text--muted' : ''}`}>
