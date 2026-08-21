@@ -28,7 +28,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import os
 
-from routers import ask, knowledge, worker, admin, voice, tickets, analytics, interview
+from routers import ask, knowledge, worker, admin, voice, tickets, analytics, interview , safety
 # Rate limiter based on client IP
 limiter = Limiter(key_func=get_remote_address)
 
@@ -63,6 +63,8 @@ app.include_router(tickets.router)
 app.include_router(analytics.router)
 app.include_router(interview.router)         # /interview/*        - worker interview flow
 app.include_router(interview.admin_router)   # /admin/interview-*  - admin session review
+app.include_router(safety.router)            # /safety/*           - worker safety briefing
+app.include_router(safety.admin_router)      # /admin/safety/*     - admin manage measures
 
 @app.get("/")
 def root():

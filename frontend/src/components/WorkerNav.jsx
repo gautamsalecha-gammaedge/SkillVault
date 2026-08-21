@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { MessageCircle, PlusCircle, ListChecks, Radio, Settings , Ticket } from 'lucide-react';
+import { MessageCircle, PlusCircle, ListChecks, Radio, Settings, Ticket, Sparkles } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 
 /**
@@ -17,6 +17,7 @@ export default function WorkerNav() {
     { to: '/worker/raise-ticket', label: 'Raise Ticket', icon: Ticket },
     { to: '/worker/my-tickets', label: 'My Tickets', icon: ListChecks },
     { to: '/worker/hands-free', label: t('handsFreeTitle'), icon: Radio },
+    { to: '/worker/interview', label: 'Share Knowledge', icon: Sparkles },
     { to: '/worker/settings', label: t('settingsTitle'), icon: Settings },
   ];
 

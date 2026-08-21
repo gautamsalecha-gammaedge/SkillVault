@@ -5,7 +5,7 @@ Defines the actual tables that will exist in your Postgres database.
 Each class here becomes one real table once we run the setup step.
 """
 
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Text, Integer
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Text, Integer , UniqueConstraint
 from datetime import datetime
 from db import Base
 
@@ -150,3 +150,39 @@ class InterviewTurn(Base):
     knowledge_entry_id = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class SafetyMeasure(Base):
+    """
+    One ordered safety instruction for a machine.
+    Workers go through these (text + audio) before starting work.
+    Admins CRUD and reorder them.
+    """
+    __tablename__ = "safety_measures"
+
+    id = Column(String, primary_key=True)  # uuid
+    machine_id = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    sort_order = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=True)
+    language_code = Column(String, nullable=False, default="en-IN")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+
+class SafetyCompletion(Base):
+    """
+    Records that a worker completed the full safety briefing for a machine.
+    One row per (worker, machine). Re-completing updates completed_at.
+    """
+    __tablename__ = "safety_completions"
+    __table_args__ = (
+        UniqueConstraint("worker_id", "machine_id", name="uq_safety_worker_machine"),
+    )
+
+    id = Column(String, primary_key=True)  # uuid
+    worker_id = Column(String, ForeignKey("workers.worker_id"), nullable=False)
+    machine_id = Column(String, nullable=False)
+    language_code = Column(String, nullable=False, default="en-IN")
+    completed_at = Column(DateTime, default=datetime.utcnow)

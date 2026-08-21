@@ -207,6 +207,44 @@ function addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress)
   });
 }
 
+/**
+ * POST /interview/{id}/answer takes multipart/form-data (answer_text,
+ * language_code, optional original audio recording) - same reasoning
+ * as addKnowledgeXhr: keep the original recording for admin playback
+ * while the text (from Sarvam STT, already run client-side via
+ * Api.transcribe before this is called) drives the actual interview logic.
+ */
+function submitInterviewAnswerXhr(sessionId, answerText, languageCode, audioBlob, onProgress) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('answer_text', answerText);
+    form.append('language_code', languageCode);
+    if (audioBlob) form.append('audio', audioBlob, 'answer.webm');
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/interview/${encodeURIComponent(sessionId)}/answer`);
+    const token = getWorkerToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+      } else {
+        if (xhr.status === 401 || xhr.status === 403) clearWorkerSession();
+        reject(new ApiError(xhr.status, (data && data.detail) || 'Something went wrong. Please try again.'));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'Network error — check your connection and try again.'));
+    xhr.send(form);
+  });
+}
+
 export const Api = {
   /* ---------------- Worker ---------------- */
   workerRegister: (worker_id, password, name) =>
@@ -298,6 +336,37 @@ export const Api = {
      No language is ever passed in here - that's the whole point,
      Sarvam figures it out from the audio itself. */
   transcribe: (audioBlob, filename) => transcribeXhr(audioBlob, filename),
+
+  /* ---------------- Tacit Knowledge Capture (Interview) ----------------
+     Worker flow: startInterview covers both "start" and "resume" - the
+     backend detects an existing in_progress/paused session for this
+     worker+machine and resumes it instead of creating a duplicate. */
+  startInterview: (machine_id, language_code) =>
+    apiFetch('/interview/start', { method: 'POST', auth: 'worker', body: { machine_id, language_code } }),
+
+  getInterview: (session_id) =>
+    apiFetch(`/interview/${encodeURIComponent(session_id)}`, { auth: 'worker' }),
+
+  submitInterviewAnswer: (session_id, answer_text, language_code, audioBlob, onProgress) =>
+    submitInterviewAnswerXhr(session_id, answer_text, language_code, audioBlob, onProgress),
+
+  pauseInterview: (session_id) =>
+    apiFetch(`/interview/${encodeURIComponent(session_id)}/pause`, { method: 'POST', auth: 'worker' }),
+
+  endInterview: (session_id) =>
+    apiFetch(`/interview/${encodeURIComponent(session_id)}/end`, { method: 'POST', auth: 'worker' }),
+
+  /* Admin review - Knowledge Review's Interviews tab */
+  adminInterviewSessions: (machine_id = null, status = null) => {
+    const params = new URLSearchParams();
+    if (machine_id) params.set('machine_id', machine_id);
+    if (status) params.set('status', status);
+    const qs = params.toString();
+    return apiFetch(`/admin/interview-sessions${qs ? `?${qs}` : ''}`, { auth: 'admin' });
+  },
+
+  adminInterviewTranscript: (session_id) =>
+    apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}`, { auth: 'admin' }),
 
   /* ---------------- Tickets ---------------- */
   createTicket: (data) =>

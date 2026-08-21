@@ -9,6 +9,7 @@ import Ask from './pages/worker/Ask';
 import AddTip from './pages/worker/AddTip';
 import MyTips from './pages/worker/MyTips';
 import HandsFree from './pages/worker/HandsFree';
+import Interview from './pages/worker/Interview';
 import Notifications from './pages/worker/Notifications';
 import Settings from './pages/worker/Settings';
 
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="add-tip" element={<AddTip />} />
         <Route path="my-tips" element={<MyTips />} />
         <Route path="hands-free" element={<HandsFree />} />
+        <Route path="interview" element={<Interview />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<Settings />} />
         <Route path="raise-ticket" element={<RaiseTicket />} />

@@ -15,5 +15,5 @@ import models  # noqa: F401 - this import is needed so Base knows about the tabl
 Base.metadata.create_all(bind=engine)
 print(
     "Tables created (or already existed): workers, worker_sessions, admin_sessions, "
-    "worker_machines, tickets, question_logs, interview_sessions, interview_turns"
+    "worker_machines, tickets, question_logs, interview_sessions, interview_turns""safety_measures, safety_completions"
 )

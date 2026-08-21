@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Search, Pencil, Check, X, Film, ChevronDown } from 'lucide-react';
+import { Search, Pencil, Check, X, Film, ChevronDown, ListChecks, Sparkles } from 'lucide-react';
 import Stamp from '../../components/Stamp';
 import { Api, mediaUrl } from '../../lib/api';
 import { useToast } from '../../lib/toast';
+import InterviewsTab from './InterviewsTab';
 
 /**
  * The backend embeds+stores the worker's tip text with the Gemini video
@@ -70,6 +71,7 @@ export default function KnowledgeReview() {
   const [busyId, setBusyId] = useState(null);
   const [savingId, setSavingId] = useState(null);
   const [openVideoId, setOpenVideoId] = useState(null); // entry.id whose transcript/description is expanded
+  const [reviewTab, setReviewTab] = useState('tips'); // 'tips' | 'interviews'
   const { push } = useToast();
 
   useEffect(() => {
@@ -162,8 +164,28 @@ export default function KnowledgeReview() {
     <div style={{ padding: '24px 32px', maxWidth: 780 }}>
       <p style={{ fontFamily: 'var(--sv-font-display)', fontWeight: 600, fontSize: 20, color: 'var(--sv-ink)' }}>Knowledge review</p>
       <p style={{ fontSize: 13, color: 'var(--sv-muted)', marginBottom: 16 }}>
-        Pending tips for one machine at a time — search narrows what's already loaded.
+        Review pending tips, or drill into a tacit knowledge interview turn by turn — one machine at a time.
       </p>
+
+      <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--sv-border)' }}>
+        {[
+          { key: 'tips', label: 'Tips', icon: ListChecks },
+          { key: 'interviews', label: 'Interviews', icon: Sparkles },
+        ].map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setReviewTab(key)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
+              cursor: 'pointer', padding: '8px 4px', marginRight: 20, fontSize: 13, fontWeight: 600,
+              color: reviewTab === key ? 'var(--sv-brass)' : 'var(--sv-muted)',
+              borderBottom: reviewTab === key ? '2px solid var(--sv-brass)' : '2px solid transparent',
+            }}
+          >
+            <Icon size={14} /> {label}
+          </button>
+        ))}
+      </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <select
@@ -173,16 +195,22 @@ export default function KnowledgeReview() {
         >
           {allMachines.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200, borderRadius: 'var(--sv-radius-sm)', padding: '8px 12px', background: 'var(--sv-surface)', border: '1px solid var(--sv-border)' }}>
-          <Search size={14} color="var(--sv-muted)" />
-          <input
-            style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13, background: 'transparent' }}
-            placeholder="Filter by text or worker..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
+        {reviewTab === 'tips' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200, borderRadius: 'var(--sv-radius-sm)', padding: '8px 12px', background: 'var(--sv-surface)', border: '1px solid var(--sv-border)' }}>
+            <Search size={14} color="var(--sv-muted)" />
+            <input
+              style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13, background: 'transparent' }}
+              placeholder="Filter by text or worker..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        )}
       </div>
+
+      {reviewTab === 'interviews' && <InterviewsTab machine={machine} />}
+      {reviewTab === 'tips' && (
+      <>
 
       {/* <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, color: 'var(--sv-muted)', marginBottom: 16, padding: 10, background: 'var(--sv-brass-soft)', borderRadius: 'var(--sv-radius-sm)' }}>
         <Info size={13} style={{ flexShrink: 0, marginTop: 1, color: 'var(--sv-brass)' }} />
@@ -261,6 +289,8 @@ export default function KnowledgeReview() {
           );
         })}
       </div>
+      </>
+      )}
     </div>
   );
 }

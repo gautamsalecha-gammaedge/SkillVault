@@ -82,3 +82,35 @@ class CreateTicketRequest(BaseModel):
 
 class UpdateTicketRequest(BaseModel):
     status: str  # Open / In Progress / Resolved / Closed
+
+
+# ---------- Safety Measures ----------
+
+class CreateSafetyMeasureRequest(BaseModel):
+    machine_id: str
+    title: str
+    content: str
+    sort_order: int = 1
+    language_code: str = "en-IN"
+    is_active: bool = True
+
+
+class UpdateSafetyMeasureRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    sort_order: Optional[int] = None
+    language_code: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class ReorderSafetyMeasureItem(BaseModel):
+    id: str
+    sort_order: int
+
+
+class ReorderSafetyMeasuresRequest(BaseModel):
+    items: list[ReorderSafetyMeasureItem]
+
+
+class CompleteSafetyRequest(BaseModel):
+    language_code: str = "en-IN"
