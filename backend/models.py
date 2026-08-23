@@ -17,8 +17,23 @@ class Worker(Base):
     worker_id = Column(String, primary_key=True)
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=False)
+    # Optional contact / location fields — filled at registration or later via profile update.
+    phone = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
     # Worker cannot log in until an admin approves their registration.
     is_approved = Column(Boolean, nullable=False, default=False)
+
+
+class AdminProfile(Base):
+    """
+    Singleton row for the admin's display name.
+    Login credentials stay in env (ADMIN_USERNAME / ADMIN_PASSWORD);
+    this table only holds editable profile fields (currently just name).
+    """
+    __tablename__ = "admin_profile"
+
+    id = Column(Integer, primary_key=True)  # always 1
+    name = Column(String, nullable=False, default="Admin")
 
 
 class WorkerSession(Base):
@@ -125,11 +140,9 @@ class InterviewSession(Base):
 
 class InterviewTurn(Base):
     """
-    One row per question-answer exchange within an InterviewSession -
-    the full transcript admin sees in Knowledge Review's Interviews tab.
-    knowledge_entry_id points at the Chroma entry this turn produced (if
-    the answer was substantial enough to distill into a tip) - null if
-    the worker had nothing to add on that particular question.
+    One Q&A turn inside an interview session.
+    Stored so the admin review page can show the full transcript
+    and so we can resume mid-session without losing prior answers.
     """
     __tablename__ = "interview_turns"
 

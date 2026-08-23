@@ -20,6 +20,7 @@ export default function AdminLayout() {
     { to: '/admin/safety-measures', label: 'Safety measures' },
     { to: '/admin/analytics', label: 'Analytics' },
     { to: '/admin/manuals', label: 'Manuals' },
+    { to: '/admin/profile', label: 'Admin profile' },
   ];
 
   function toggleTheme() {

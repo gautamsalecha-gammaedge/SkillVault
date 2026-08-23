@@ -62,6 +62,11 @@ export default function PendingWorkers() {
             <div>
               <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--sv-ink)' }}>{w.name}</p>
               <p style={{ fontSize: 12, fontFamily: 'var(--sv-font-mono)', color: 'var(--sv-muted)' }}>{w.worker_id}</p>
+              {(w.phone || w.address) && (
+                <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginTop: 2 }}>
+                  {[w.phone, w.address].filter(Boolean).join(' · ')}
+                </p>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="sv-btn sv-btn--teal" disabled={busyId === w.worker_id} onClick={() => approve(w.worker_id)}>
