@@ -17,23 +17,31 @@ class Worker(Base):
     worker_id = Column(String, primary_key=True)
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=False)
-    # Optional contact / location fields — filled at registration or later via profile update.
-    phone = Column(String, nullable=True)
-    address = Column(Text, nullable=True)
     # Worker cannot log in until an admin approves their registration.
     is_approved = Column(Boolean, nullable=False, default=False)
+
+    # Profile fields - all optional, filled in at registration or later
+    # via PUT /worker/profile (self) or PUT /admin/workers/{id} (admin).
+    phone_country_code = Column(String, nullable=True, default="+91")
+    phone_number = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
 
 
 class AdminProfile(Base):
     """
-    Singleton row for the admin's display name.
-    Login credentials stay in env (ADMIN_USERNAME / ADMIN_PASSWORD);
-    this table only holds editable profile fields (currently just name).
+    Editable display profile for the admin account. Login credentials
+    (ADMIN_USERNAME / ADMIN_PASSWORD) stay fixed in .env - this table
+    only stores the display name, so it can be updated from the app
+    without ever touching the login password. Keyed by username so it
+    still lines up if ADMIN_USERNAME is ever rotated. Row is created
+    lazily on first PUT /admin/profile (or read as "no name set yet"
+    on GET before that).
     """
-    __tablename__ = "admin_profile"
+    __tablename__ = "admin_profiles"
 
-    id = Column(Integer, primary_key=True)  # always 1
-    name = Column(String, nullable=False, default="Admin")
+    username = Column(String, primary_key=True)
+    name = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class WorkerSession(Base):
@@ -140,9 +148,11 @@ class InterviewSession(Base):
 
 class InterviewTurn(Base):
     """
-    One Q&A turn inside an interview session.
-    Stored so the admin review page can show the full transcript
-    and so we can resume mid-session without losing prior answers.
+    One row per question-answer exchange within an InterviewSession -
+    the full transcript admin sees in Knowledge Review's Interviews tab.
+    knowledge_entry_id points at the Chroma entry this turn produced (if
+    the answer was substantial enough to distill into a tip) - null if
+    the worker had nothing to add on that particular question.
     """
     __tablename__ = "interview_turns"
 

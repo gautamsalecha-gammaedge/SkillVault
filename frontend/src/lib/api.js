@@ -247,22 +247,30 @@ function submitInterviewAnswerXhr(sessionId, answerText, languageCode, audioBlob
 
 export const Api = {
   /* ---------------- Worker ---------------- */
-  workerRegister: (password, name, phone, address) =>
-    apiFetch('/worker/register', { method: 'POST', body: { password, name, phone, address } }),
+  /* worker_id is no longer chosen at registration - the backend
+     auto-generates it and hands it back in the response (res.worker_id). */
+  workerRegister: (password, name, phone_country_code, phone_number, address) =>
+    apiFetch('/worker/register', {
+      method: 'POST',
+      body: { password, name, phone_country_code, phone_number, address },
+    }),
 
   workerLogin: (worker_id, password) =>
     apiFetch('/worker/login', { method: 'POST', body: { worker_id, password } }),
 
-  workerMe: () => apiFetch('/worker/me', { auth: 'worker' }),
-
-  updateWorkerProfile: (payload) =>
-    apiFetch('/worker/profile', { method: 'PUT', auth: 'worker', body: payload }),
-
   myMachines: () => apiFetch('/worker/my-machines', { auth: 'worker' }),
-
+  
   myTips: () => apiFetch('/worker/my-tips', { auth: 'worker' }),
 
-  /* ---------------- Admin auth / profile ---------------- */
+  myProfile: () => apiFetch('/worker/profile', { auth: 'worker' }),
+
+  /* updates only accept the fields provided - pass current_password +
+     new_password together to change password, omit both to leave it alone. */
+  updateMyProfile: (fields) =>
+    apiFetch('/worker/profile', { method: 'PUT', auth: 'worker', body: fields }),
+
+
+  /* ---------------- Admin ---------------- */
   adminLogin: (username, password) =>
     apiFetch('/admin/login', { method: 'POST', body: { username, password } }),
 
@@ -271,88 +279,61 @@ export const Api = {
   updateAdminProfile: (name) =>
     apiFetch('/admin/profile', { method: 'PUT', auth: 'admin', body: { name } }),
 
-  updateWorkerAsAdmin: (worker_id, payload) =>
-    apiFetch(`/admin/workers/${encodeURIComponent(worker_id)}`, {
-      method: 'PUT',
-      auth: 'admin',
-      body: payload,
-    }),
+  /* Admin editing a worker's profile - fields object may include name,
+     phone_country_code, phone_number, address, and new_worker_id (to
+     rename the worker's login ID). Never accepts a password field. */
+  updateWorkerByAdmin: (worker_id, fields) =>
+    apiFetch(`/admin/workers/${encodeURIComponent(worker_id)}`, { method: 'PUT', auth: 'admin', body: fields }),
 
-  /* ---------------- Workers & machines ---------------- */
   pendingWorkers: () => apiFetch('/admin/pending-workers', { auth: 'admin' }),
-
   approveWorker: (worker_id) =>
-    apiFetch(`/admin/approve-worker/${encodeURIComponent(worker_id)}`, {
-      method: 'POST',
-      auth: 'admin',
-    }),
-
+    apiFetch(`/admin/approve-worker/${encodeURIComponent(worker_id)}`, { method: 'POST', auth: 'admin' }),
   rejectWorker: (worker_id) =>
-    apiFetch(`/admin/reject-worker/${encodeURIComponent(worker_id)}`, {
-      method: 'DELETE',
-      auth: 'admin',
-    }),
+    apiFetch(`/admin/reject-worker/${encodeURIComponent(worker_id)}`, { method: 'DELETE', auth: 'admin' }),
 
   allWorkers: () => apiFetch('/admin/workers', { auth: 'admin' }),
-
   allMachines: () => apiFetch('/admin/all-machines', { auth: 'admin' }),
-
   assignMachine: (worker_id, machine_id) =>
-    apiFetch('/admin/assign-machine', {
-      method: 'POST',
-      auth: 'admin',
-      body: { worker_id, machine_id },
-    }),
-
+    apiFetch('/admin/assign-machine', { method: 'POST', auth: 'admin', body: { worker_id, machine_id } }),
   unassignMachine: (worker_id, machine_id) =>
     apiFetch(
       `/admin/unassign-machine?worker_id=${encodeURIComponent(worker_id)}&machine_id=${encodeURIComponent(machine_id)}`,
       { method: 'DELETE', auth: 'admin' }
     ),
-
   workerMachines: (worker_id) =>
     apiFetch(`/admin/worker-machines/${encodeURIComponent(worker_id)}`, { auth: 'admin' }),
 
-  /* ---------------- Knowledge review ---------------- */
   pendingEntries: (machine_id) =>
     apiFetch(`/admin/pending?machine_id=${encodeURIComponent(machine_id)}`, { auth: 'admin' }),
-
   approveEntry: (entry_id) =>
-    apiFetch(`/admin/approve/${encodeURIComponent(entry_id)}`, {
-      method: 'POST',
-      auth: 'admin',
-    }),
-
+    apiFetch(`/admin/approve/${encodeURIComponent(entry_id)}`, { method: 'POST', auth: 'admin' }),
   deleteEntry: (entry_id) =>
-    apiFetch(`/admin/delete/${encodeURIComponent(entry_id)}`, {
-      method: 'DELETE',
-      auth: 'admin',
-    }),
-
+    apiFetch(`/admin/delete/${encodeURIComponent(entry_id)}`, { method: 'DELETE', auth: 'admin' }),
   editEntry: (entry_id, text) =>
-    apiFetch(`/admin/edit/${encodeURIComponent(entry_id)}`, {
-      method: 'PUT',
-      auth: 'admin',
-      body: { text },
-    }),
+    apiFetch(`/admin/edit/${encodeURIComponent(entry_id)}`, { method: 'PUT', auth: 'admin', body: { text } }),
 
-  /* ---------------- Manuals ---------------- */
-  uploadManual: (machine_id, file, onProgress) =>
-    uploadManualXhr(machine_id, file, onProgress),
-
+  uploadManual: (machine_id, file, onProgress) => uploadManualXhr(machine_id, file, onProgress),
   manuals: (machine_id) =>
     apiFetch(`/admin/manuals?machine_id=${encodeURIComponent(machine_id)}`, { auth: 'admin' }),
-
   deleteManual: (machine_id, filename) =>
     apiFetch(
       `/admin/manual?machine_id=${encodeURIComponent(machine_id)}&filename=${encodeURIComponent(filename)}`,
       { method: 'DELETE', auth: 'admin' }
     ),
 
-  /* ---------------- Analytics ---------------- */
   analytics: () => apiFetch('/admin/analytics', { auth: 'admin' }),
 
-  /* ---------------- Ask / Knowledge / Voice ---------------- */
+  /* ---------------- Ask / Knowledge / Voice ----------------
+     NOTE: /ask currently returns { answer, sources_used } where
+     sources_used is a count, NOT structured source data. The
+     confidence bar / source-attribution chips seen in the design
+     preview have no backend field to bind to yet — treat as UI
+     that's ready for a contract that doesn't exist server-side yet.
+
+     language_code on checkKnowledge/addKnowledge/speak comes from
+     Sarvam STT's auto-detected language (see transcribe below), not
+     from any stored app setting — each call carries whatever was just
+     detected from the worker's own voice. */
   ask: (question, machine_id) =>
     apiFetch('/ask', { method: 'POST', auth: 'worker', body: { question, machine_id } }),
 
@@ -363,50 +344,55 @@ export const Api = {
       body: { text, machine_id, round, language_code },
     }),
 
+  /* Now multipart (text, machine_id, language_code, + optional video file)
+     since the backend forwards an attached video to Gemini for
+     understanding. videoFile and onProgress are both optional — omit
+     both for a plain text tip, exactly like before. Response now also
+     includes video_url when a video was attached. */
   addKnowledge: (text, machine_id, language_code, videoFile = null, onProgress = null) =>
     addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress),
 
-  speak: (text, language_code) =>
-    apiFetchBinary('/speak', { body: { text, language_code } }),
+  speak: (text, language_code) => apiFetchBinary('/speak', { body: { text, language_code } }),
 
+  /* Records audio -> Sarvam STT transcribes it AND auto-detects the
+     spoken language in one call. Returns { transcript, language_code }.
+     No language is ever passed in here - that's the whole point,
+     Sarvam figures it out from the audio itself. */
   transcribe: (audioBlob, filename) => transcribeXhr(audioBlob, filename),
 
-  /* ---------------- Tacit Knowledge Capture (Interview) ---------------- */
+  /* ---------------- Tacit Knowledge Capture (Interview) ----------------
+     Worker flow: startInterview covers both "start" and "resume" - the
+     backend detects an existing in_progress/paused session for this
+     worker+machine and resumes it instead of creating a duplicate. */
   startInterview: (machine_id, language_code, fresh = false) =>
-    apiFetch('/interview/start', {
-      method: 'POST',
-      auth: 'worker',
-      body: { machine_id, language_code, fresh },
-    }),
+    apiFetch('/interview/start', { method: 'POST', auth: 'worker', body: { machine_id, language_code, fresh } }),
 
+  /* Read-only - checks whether a resumable (in_progress/paused) session
+     already exists for this machine, so the UI can ask "continue or
+     start fresh" BEFORE calling startInterview (which would otherwise
+     resume silently). */
   checkInterview: (machine_id) =>
-    apiFetch(`/interview/check?machine_id=${encodeURIComponent(machine_id)}`, {
-      auth: 'worker',
-    }),
+    apiFetch(`/interview/check?machine_id=${encodeURIComponent(machine_id)}`, { auth: 'worker' }),
 
   getInterview: (session_id) =>
     apiFetch(`/interview/${encodeURIComponent(session_id)}`, { auth: 'worker' }),
 
+  /* Worker's own turn-by-turn transcript so far - used to rebuild the
+     conversation thread on resume instead of dropping back in with an
+     empty screen (see routers/interview.py get_interview_transcript_worker). */
   interviewTranscript: (session_id) =>
-    apiFetch(`/interview/${encodeURIComponent(session_id)}/transcript`, {
-      auth: 'worker',
-    }),
+    apiFetch(`/interview/${encodeURIComponent(session_id)}/transcript`, { auth: 'worker' }),
 
   submitInterviewAnswer: (session_id, answer_text, language_code, audioBlob, onProgress) =>
     submitInterviewAnswerXhr(session_id, answer_text, language_code, audioBlob, onProgress),
 
   pauseInterview: (session_id) =>
-    apiFetch(`/interview/${encodeURIComponent(session_id)}/pause`, {
-      method: 'POST',
-      auth: 'worker',
-    }),
+    apiFetch(`/interview/${encodeURIComponent(session_id)}/pause`, { method: 'POST', auth: 'worker' }),
 
   endInterview: (session_id) =>
-    apiFetch(`/interview/${encodeURIComponent(session_id)}/end`, {
-      method: 'POST',
-      auth: 'worker',
-    }),
+    apiFetch(`/interview/${encodeURIComponent(session_id)}/end`, { method: 'POST', auth: 'worker' }),
 
+  /* Admin review - Knowledge Review's Interviews tab */
   adminInterviewSessions: (machine_id = null, status = null) => {
     const params = new URLSearchParams();
     if (machine_id) params.set('machine_id', machine_id);
@@ -416,23 +402,22 @@ export const Api = {
   },
 
   adminInterviewTranscript: (session_id) =>
-    apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}`, {
-      auth: 'admin',
-    }),
+    apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}`, { auth: 'admin' }),
 
+  /* Session-level bulk review - approves/deletes every still-pending
+     insight from one interview in a single call, instead of forcing an
+     admin into the transcript to click Approve/Delete turn by turn. */
   approveSessionPending: (session_id) =>
-    apiFetch(
-      `/admin/interview-sessions/${encodeURIComponent(session_id)}/approve-pending`,
-      { method: 'POST', auth: 'admin' }
-    ),
-
+    apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}/approve-pending`, { method: 'POST', auth: 'admin' }),
   rejectSessionPending: (session_id) =>
-    apiFetch(
-      `/admin/interview-sessions/${encodeURIComponent(session_id)}/reject-pending`,
-      { method: 'POST', auth: 'admin' }
-    ),
+    apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}/reject-pending`, { method: 'POST', auth: 'admin' }),
 
-  /* ---------------- Machine Safety Measures ---------------- */
+  /* ---------------- Machine Safety Measures ----------------
+     Worker briefing flow: mySafetyStatus feeds the Safety hub grid
+     (one call, one badge per assigned machine); safetyMeasures loads
+     the ordered text+audio steps for one machine; completeSafety marks
+     the briefing done (idempotent — re-completing just refreshes the
+     timestamp, used for periodic refreshers). */
   mySafetyStatus: () => apiFetch('/safety/my-status', { auth: 'worker' }),
 
   safetyMeasures: (machine_id) =>
@@ -448,6 +433,8 @@ export const Api = {
       body: { language_code },
     }),
 
+  /* Admin — CRUD + reorder + who's-completed, for the Safety Measures
+     management screen. */
   adminSafetyMeasures: (machine_id) =>
     apiFetch(`/admin/safety/${encodeURIComponent(machine_id)}`, { auth: 'admin' }),
 
@@ -455,11 +442,7 @@ export const Api = {
     apiFetch('/admin/safety', { method: 'POST', auth: 'admin', body: data }),
 
   updateSafetyMeasure: (id, data) =>
-    apiFetch(`/admin/safety/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      auth: 'admin',
-      body: data,
-    }),
+    apiFetch(`/admin/safety/${encodeURIComponent(id)}`, { method: 'PUT', auth: 'admin', body: data }),
 
   deleteSafetyMeasure: (id, hard = false) =>
     apiFetch(`/admin/safety/${encodeURIComponent(id)}${hard ? '?hard=true' : ''}`, {
@@ -468,45 +451,17 @@ export const Api = {
     }),
 
   reorderSafetyMeasures: (items) =>
-    apiFetch('/admin/safety/reorder', {
-      method: 'POST',
-      auth: 'admin',
-      body: { items },
-    }),
+    apiFetch('/admin/safety/reorder', { method: 'POST', auth: 'admin', body: { items } }),
 
   safetyCompletions: (machine_id) =>
-    apiFetch(`/admin/safety/${encodeURIComponent(machine_id)}/completions`, {
-      auth: 'admin',
-    }),
-
-  requireSafetyRetake: (machine_id, worker_id) =>
-    apiFetch(
-      `/admin/safety/${encodeURIComponent(machine_id)}/completions/${encodeURIComponent(worker_id)}`,
-      { method: 'DELETE', auth: 'admin' }
-    ),
-
-  uploadSafetyVideo: (measure_id, file) => {
-    const form = new FormData();
-    form.append('video', file);
-    return apiFetch(`/admin/safety/${encodeURIComponent(measure_id)}/video`, {
-      method: 'POST',
-      auth: 'admin',
-      isForm: true,
-      body: form,
-    });
-  },
-
-  deleteSafetyVideo: (measure_id) =>
-    apiFetch(`/admin/safety/${encodeURIComponent(measure_id)}/video`, {
-      method: 'DELETE',
-      auth: 'admin',
-    }),
+    apiFetch(`/admin/safety/${encodeURIComponent(machine_id)}/completions`, { auth: 'admin' }),
 
   /* ---------------- Tickets ---------------- */
   createTicket: (data) =>
     apiFetch('/tickets', { method: 'POST', auth: 'worker', body: data }),
 
-  myTickets: () => apiFetch('/tickets/my', { auth: 'worker' }),
+  myTickets: () =>
+    apiFetch('/tickets/my', { auth: 'worker' }),
 
   adminTickets: (status = null) =>
     apiFetch(
@@ -520,4 +475,5 @@ export const Api = {
       auth: 'admin',
       body: { status },
     }),
+
 };

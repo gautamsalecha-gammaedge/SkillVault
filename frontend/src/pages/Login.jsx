@@ -6,6 +6,7 @@ import { Api } from '../lib/api';
 import { setWorkerSession, setAdminSession } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useToast } from '../lib/toast';
+import { COUNTRY_CODES } from '../lib/countryCodes';
 
 const STEP = { LANGUAGE: 'language', ROLE: 'role', WORKER: 'worker', ADMIN: 'admin' };
 
@@ -68,14 +69,14 @@ function LanguageStep({ t, value, languages, onPick }) {
           <button
             key={l.code}
             className="sv-btn sv-btn--outline sv-btn--full"
-            style={{
-              justifyContent: 'flex-start',
+            style={{ 
+              justifyContent: 'flex-start', 
               padding: '14px 16px',
               fontSize: '14px',
               fontWeight: 600,
               borderRadius: 'var(--sv-radius-md)',
               border: value === l.code ? '2px solid var(--sv-brass)' : '1.5px solid var(--sv-border)',
-              background: value === l.code ? 'var(--sv-brass-soft)' : 'transparent',
+              background: value === l.code ? 'var(--sv-brass-soft)' : 'var(--sv-surface)',
               color: value === l.code ? 'var(--sv-brass)' : 'var(--sv-ink)',
             }}
             onClick={() => onPick(l.code)}
@@ -94,21 +95,19 @@ function RoleStep({ t, onBack, onPick }) {
       <BackButton t={t} onClick={onBack} />
       <p style={styles.heading}>{t('selectRole')}</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 24 }}>
-        <button
-          className="sv-btn sv-btn--outline sv-btn--full"
-          style={{ justifyContent: 'flex-start', padding: '16px', textAlign: 'left', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}
+        <button 
+          className="sv-btn sv-btn--primary sv-btn--full" 
+          style={{ padding: '14px 16px', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--sv-radius-md)' }} 
           onClick={() => onPick('worker')}
         >
-          <span style={{ fontWeight: 600, fontSize: 15 }}>{t('roleWorker')}</span>
-          <span style={{ fontSize: 12, color: 'var(--sv-muted)', fontWeight: 400 }}>{t('roleWorkerHint')}</span>
+          {t('roleWorker')}
         </button>
-        <button
-          className="sv-btn sv-btn--outline sv-btn--full"
-          style={{ justifyContent: 'flex-start', padding: '16px', textAlign: 'left', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}
+        <button 
+          className="sv-btn sv-btn--outline sv-btn--full" 
+          style={{ padding: '14px 16px', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--sv-radius-md)' }} 
           onClick={() => onPick('admin')}
         >
-          <span style={{ fontWeight: 600, fontSize: 15 }}>{t('roleAdmin')}</span>
-          <span style={{ fontSize: 12, color: 'var(--sv-muted)', fontWeight: 400 }}>{t('roleAdminHint')}</span>
+          {t('roleAdmin')}
         </button>
       </div>
     </div>
@@ -116,21 +115,22 @@ function RoleStep({ t, onBack, onPick }) {
 }
 
 function WorkerAuth({ t, onBack, onSuccess, toast }) {
-  const [mode, setMode] = useState('login'); // 'login' | 'register' | 'registered'
+  const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [workerId, setWorkerId] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [countryCode, setCountryCode] = useState('+91');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false);
-  const [issuedId, setIssuedId] = useState('');
+  const [assignedWorkerId, setAssignedWorkerId] = useState(null);
 
   async function handleLogin(e) {
     e.preventDefault();
     setBusy(true);
     try {
       const res = await Api.workerLogin(workerId, password);
-      setWorkerSession(res.token, res.name, res.worker_id || workerId);
+      setWorkerSession(res.token, res.name, workerId);
       toast(`${res.name}`, 'success');
       onSuccess();
     } catch (err) {
@@ -144,10 +144,8 @@ function WorkerAuth({ t, onBack, onSuccess, toast }) {
     e.preventDefault();
     setBusy(true);
     try {
-      const res = await Api.workerRegister(password, name, phone || null, address || null);
-      setIssuedId(res.worker_id);
-      setWorkerId(res.worker_id);
-      setMode('registered');
+      const res = await Api.workerRegister(password, name, countryCode, phoneNumber || null, address || null);
+      setAssignedWorkerId(res.worker_id);
       toast(t('registerSuccessBody'), 'success');
     } catch (err) {
       toast(err.message, 'error');
@@ -156,22 +154,31 @@ function WorkerAuth({ t, onBack, onSuccess, toast }) {
     }
   }
 
-  if (mode === 'registered') {
+  function backToLoginAfterRegister() {
+    setAssignedWorkerId(null);
+    setMode('login');
+    setWorkerId('');
+    setPassword('');
+    setName('');
+    setPhoneNumber('');
+    setAddress('');
+  }
+
+  if (assignedWorkerId) {
     return (
       <div style={{ animation: 'slideInUp var(--sv-transition-base)' }}>
         <p style={styles.heading}>{t('registerSuccessTitle')}</p>
-        <p style={{ ...styles.sub, marginTop: 12 }}>{t('registerSuccessBody')}</p>
-        <div className="sv-card" style={{ marginTop: 20, padding: 16, background: 'var(--sv-brass-soft)', border: '1px solid var(--sv-brass)' }}>
-          <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginBottom: 6 }}>{t('yourWorkerId')}</p>
-          <p style={{ fontSize: 22, fontFamily: 'var(--sv-font-mono)', fontWeight: 700, color: 'var(--sv-ink)', letterSpacing: '0.04em' }}>
-            {issuedId}
-          </p>
-          <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginTop: 8 }}>{t('saveWorkerIdHint')}</p>
+        <p style={{ ...styles.sub, marginTop: 8 }}>{t('registerSuccessBody')}</p>
+        <div style={{ ...styles.input, marginTop: 20, textAlign: 'center', fontWeight: 700, fontSize: 18, letterSpacing: '0.02em' }}>
+          {assignedWorkerId}
         </div>
+        <p style={{ ...styles.sub, marginTop: 8 }}>
+          {t('yourWorkerIdIs').replace('{workerId}', assignedWorkerId)}
+        </p>
         <button
           className="sv-btn sv-btn--primary sv-btn--full"
-          style={{ marginTop: 20, padding: '14px 16px' }}
-          onClick={() => setMode('login')}
+          style={{ marginTop: 20, padding: '14px 16px', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--sv-radius-md)' }}
+          onClick={backToLoginAfterRegister}
         >
           {t('backToLogin')}
         </button>
@@ -193,44 +200,52 @@ function WorkerAuth({ t, onBack, onSuccess, toast }) {
               onChange={(e) => setName(e.target.value)}
               required
             />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select
+                style={{ ...styles.input, flex: '0 0 130px' }}
+                value={countryCode}
+                onChange={(e) => setCountryCode(e.target.value)}
+              >
+                {COUNTRY_CODES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code}</option>
+                ))}
+              </select>
+              <input
+                style={{ ...styles.input, flex: 1 }}
+                placeholder={`${t('phoneNumberLabel')} (${t('optionalTag')})`}
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+              />
+            </div>
             <input
               style={styles.input}
-              placeholder={t('phoneLabel')}
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              inputMode="tel"
-            />
-            <textarea
-              style={{ ...styles.input, minHeight: 72, resize: 'vertical' }}
-              placeholder={t('addressLabel')}
+              placeholder={`${t('addressLabel')} (${t('optionalTag')})`}
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              rows={2}
             />
           </>
         )}
         {mode === 'login' && (
-          <input
-            style={styles.input}
-            placeholder={t('workerIdLabel')}
-            value={workerId}
-            onChange={(e) => setWorkerId(e.target.value)}
-            required
+          <input 
+            style={styles.input} 
+            placeholder={t('workerIdLabel')} 
+            value={workerId} 
+            onChange={(e) => setWorkerId(e.target.value)} 
+            required 
           />
         )}
-        <input
-          style={styles.input}
-          placeholder={t('passwordLabel')}
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={mode === 'register' ? 4 : undefined}
+        <input 
+          style={styles.input} 
+          placeholder={t('passwordLabel')} 
+          type="password" 
+          value={password} 
+          onChange={(e) => setPassword(e.target.value)} 
+          required 
         />
-        <button
-          className="sv-btn sv-btn--primary sv-btn--full"
-          style={{ padding: '14px 16px', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--sv-radius-md)' }}
-          disabled={busy}
+        <button 
+          className="sv-btn sv-btn--primary sv-btn--full" 
+          style={{ padding: '14px 16px', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--sv-radius-md)' }} 
+          disabled={busy} 
           type="submit"
         >
           {busy ? t('loading') : mode === 'login' ? t('loginBtn') : t('registerBtn')}
@@ -256,7 +271,7 @@ function AdminAuth({ t, onBack, onSuccess, toast }) {
     setBusy(true);
     try {
       const res = await Api.adminLogin(username, password);
-      setAdminSession(res.token);
+      setAdminSession(res.token, res.name);
       onSuccess();
     } catch (err) {
       toast(err.message, 'error');
@@ -270,25 +285,25 @@ function AdminAuth({ t, onBack, onSuccess, toast }) {
       <BackButton t={t} onClick={onBack} />
       <p style={styles.heading}>{t('roleAdmin')}</p>
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 24 }}>
-        <input
-          style={styles.input}
-          placeholder={t('adminUsernameLabel')}
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
+        <input 
+          style={styles.input} 
+          placeholder={t('adminUsernameLabel')} 
+          value={username} 
+          onChange={(e) => setUsername(e.target.value)} 
+          required 
         />
-        <input
-          style={styles.input}
-          placeholder={t('adminPasswordLabel')}
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
+        <input 
+          style={styles.input} 
+          placeholder={t('adminPasswordLabel')} 
+          type="password" 
+          value={password} 
+          onChange={(e) => setPassword(e.target.value)} 
+          required 
         />
-        <button
-          className="sv-btn sv-btn--primary sv-btn--full"
-          style={{ padding: '14px 16px', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--sv-radius-md)' }}
-          disabled={busy}
+        <button 
+          className="sv-btn sv-btn--primary sv-btn--full" 
+          style={{ padding: '14px 16px', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--sv-radius-md)' }} 
+          disabled={busy} 
           type="submit"
         >
           {busy ? t('loading') : t('adminLoginBtn')}
@@ -300,8 +315,8 @@ function AdminAuth({ t, onBack, onSuccess, toast }) {
 
 function BackButton({ t, onClick }) {
   return (
-    <button
-      onClick={onClick}
+    <button 
+      onClick={onClick} 
       style={{ ...styles.linkBtn, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 12 }}
       title={t('back')}
     >

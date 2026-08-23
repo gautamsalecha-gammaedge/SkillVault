@@ -4,7 +4,6 @@ import { RequireWorker, RequireAdmin } from './lib/guards';
 import Login from './pages/Login';
 import WorkerLayout from './components/WorkerLayout';
 import AdminLayout from './components/AdminLayout';
-import AdminProfile from './pages/admin/AdminProfile';
 
 import Ask from './pages/worker/Ask';
 import AddTip from './pages/worker/AddTip';
@@ -25,6 +24,7 @@ import RaiseTicket from './pages/worker/RaiseTicket';
 import MyTickets from './pages/worker/MyTickets';
 import Tickets from './pages/admin/Tickets';
 import SafetyMeasures from './pages/admin/SafetyMeasures';
+import AdminProfile from './pages/admin/Profile';
 export default function App() {
   return (
     <Routes>
@@ -46,7 +46,6 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="raise-ticket" element={<RaiseTicket />} />
         <Route path="my-tickets" element={<MyTickets />} />
-        <Route path="profile" element={<AdminProfile />} />
         
       </Route>
 

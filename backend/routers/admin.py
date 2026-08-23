@@ -8,15 +8,20 @@ DELETE /admin/delete/{id}              - admin deletes a knowledge entry (pendin
 GET    /admin/pending-workers          - admin views worker registrations waiting for approval
 POST   /admin/approve-worker/{id}      - admin approves a worker's account, letting them log in
 DELETE /admin/reject-worker/{id}       - admin rejects/removes a worker's registration entirely
+GET    /admin/profile                  - admin views their own editable display name
+PUT    /admin/profile                  - admin updates their own display name (never the password)
+PUT    /admin/workers/{worker_id}      - admin updates a worker's profile, optionally
+                                          renaming their worker_id too (never the password)
 """
 
 import secrets
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from rag.embeddings import embed_text_with_retry
 from db import get_db
 from models import AdminSession, AdminProfile, Worker, WorkerSession, WorkerMachine, Ticket, QuestionLog, InterviewSession, SafetyCompletion
-from schemas import AdminLoginRequest, AssignMachineRequest, EditEntryRequest, AdminUpdateWorkerRequest, AdminUpdateProfileRequest
+from schemas import AdminLoginRequest, AssignMachineRequest, EditEntryRequest, AdminProfileUpdateRequest, AdminUpdateWorkerRequest
 from auth.security import make_expiry_time
 from auth.admin_auth import require_admin
 from rag.chroma_store import collection , list_manuals, delete_manual , list_all_machine_ids
@@ -39,15 +44,45 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
     db.add(session)
     db.commit()
 
-    profile = db.query(AdminProfile).filter(AdminProfile.id == 1).first()
-    admin_name = profile.name if profile else "Admin"
+    profile = db.query(AdminProfile).filter(AdminProfile.username == ADMIN_USERNAME).first()
 
     return {
         "token": token,
-        "name": admin_name,
+        "name": profile.name if profile else None,
         "expires_in_hours": TOKEN_EXPIRY_HOURS,
         "message": "Login successful. Use this token in the Authorization header as 'Bearer <token>'.",
     }
+
+
+@router.get("/profile")
+def get_admin_profile(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """Returns the admin's own editable display name. There's a single fixed
+    admin account (login credentials live in .env), so this is always keyed
+    off ADMIN_USERNAME rather than anything from the request."""
+    profile = db.query(AdminProfile).filter(AdminProfile.username == ADMIN_USERNAME).first()
+    return {
+        "username": ADMIN_USERNAME,
+        "name": profile.name if profile else None,
+    }
+
+
+@router.put("/profile")
+def update_admin_profile(
+    req: AdminProfileUpdateRequest,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin updates their own display name. Login credentials (username/password)
+    are fixed in .env and are never editable through this endpoint."""
+    profile = db.query(AdminProfile).filter(AdminProfile.username == ADMIN_USERNAME).first()
+    if profile:
+        profile.name = req.name
+    else:
+        profile = AdminProfile(username=ADMIN_USERNAME, name=req.name)
+        db.add(profile)
+    db.commit()
+
+    return {"status": "updated", "username": ADMIN_USERNAME, "name": profile.name}
 
 
 @router.post("/approve/{entry_id}")
@@ -80,9 +115,10 @@ def get_all_workers(authorized: bool = Depends(require_admin), db: Session = Dep
             {
                 "worker_id": w.worker_id,
                 "name": w.name,
-                "phone": w.phone,
-                "address": w.address,
                 "is_approved": w.is_approved,
+                "phone_country_code": w.phone_country_code,
+                "phone_number": w.phone_number,
+                "address": w.address,
             }
             for w in workers
         ]
@@ -124,20 +160,14 @@ def get_pending_workers(authorized: bool = Depends(require_admin), db: Session =
     pending = db.query(Worker).filter(Worker.is_approved == False).all()  # noqa: E712
     return {
         "pending_workers": [
-            {
-                "worker_id": w.worker_id,
-                "name": w.name,
-                "phone": w.phone,
-                "address": w.address,
-            }
-            for w in pending
+            {"worker_id": w.worker_id, "name": w.name} for w in pending
         ]
     }
 
 
 @router.post("/approve-worker/{worker_id}")
 def approve_worker(worker_id: str, authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    """Approves a worker's account so they can log in."""
+    """Approves a worker's registration, allowing them to log in from now on."""
     worker = db.query(Worker).filter(Worker.worker_id == worker_id).first()
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found.")
@@ -162,6 +192,107 @@ def reject_worker(worker_id: str, authorized: bool = Depends(require_admin), db:
     db.commit()
 
     return {"status": "rejected and removed", "worker_id": worker_id}
+
+
+# --- Worker profile management (admin editing a worker) ---
+
+# Every table that has a worker_id foreign key pointing at workers.worker_id -
+# used by the rename cascade below. If a new table gains a worker_id FK later,
+# it needs to be added here too or a rename will silently orphan its rows.
+_WORKER_ID_CHILD_TABLES = [WorkerSession, WorkerMachine, Ticket, QuestionLog, InterviewSession, SafetyCompletion]
+
+
+@router.put("/workers/{worker_id}")
+def admin_update_worker(
+    worker_id: str,
+    req: AdminUpdateWorkerRequest,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin updates any field on a worker's profile except the password -
+    admin can never set or view a worker's password. Only fields actually
+    provided in the request are changed.
+
+    If new_worker_id is provided and differs from the current one, the
+    worker's login ID is renamed. Since worker_id is the primary key AND
+    is referenced by several other tables' foreign keys, a direct UPDATE
+    isn't possible while those rows still point at the old id - so this:
+      1. inserts a new Worker row under new_worker_id (copy of the old one,
+         with any other requested field changes already applied)
+      2. re-points every child row (sessions, machine assignments, tickets,
+         question logs, interview sessions, safety completions) at the new id
+      3. deletes the old Worker row
+      4. updates worker_id in every matching Chroma entry (tips this worker
+         submitted), so their submission history stays attributed to them
+    all inside one transaction, so a failure partway through rolls back
+    cleanly instead of leaving the worker half-renamed.
+    """
+    worker = db.query(Worker).filter(Worker.worker_id == worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found.")
+
+    new_id = req.new_worker_id.strip() if req.new_worker_id else None
+    renaming = bool(new_id) and new_id != worker_id
+
+    if renaming:
+        if db.query(Worker).filter(Worker.worker_id == new_id).first():
+            raise HTTPException(status_code=400, detail=f"Worker ID '{new_id}' is already in use.")
+
+    final_name = req.name if req.name is not None else worker.name
+    final_country_code = req.phone_country_code if req.phone_country_code is not None else worker.phone_country_code
+    final_phone = req.phone_number if req.phone_number is not None else worker.phone_number
+    final_address = req.address if req.address is not None else worker.address
+
+    try:
+        if renaming:
+            new_worker = Worker(
+                worker_id=new_id,
+                password_hash=worker.password_hash,
+                name=final_name,
+                is_approved=worker.is_approved,
+                phone_country_code=final_country_code,
+                phone_number=final_phone,
+                address=final_address,
+            )
+            db.add(new_worker)
+            db.flush()  # new row must exist before children are re-pointed at it
+
+            for table in _WORKER_ID_CHILD_TABLES:
+                db.query(table).filter(table.worker_id == worker_id).update({"worker_id": new_id})
+
+            db.delete(worker)
+            db.commit()
+
+            # Chroma tips carry worker_id in metadata, not a DB foreign key -
+            # update those separately so /worker/my-tips still finds them.
+            tip_entries = collection.get(where={"worker_id": worker_id})
+            for i, entry_id in enumerate(tip_entries["ids"]):
+                meta = tip_entries["metadatas"][i]
+                meta["worker_id"] = new_id
+                collection.update(ids=[entry_id], metadatas=[meta])
+
+            final_worker_id = new_id
+        else:
+            worker.name = final_name
+            worker.phone_country_code = final_country_code
+            worker.phone_number = final_phone
+            worker.address = final_address
+            db.commit()
+            final_worker_id = worker_id
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Could not update worker - a conflicting record already exists.")
+
+    return {
+        "status": "updated",
+        "worker_id": final_worker_id,
+        "name": final_name,
+        "phone_country_code": final_country_code,
+        "phone_number": final_phone,
+        "address": final_address,
+    }
 
 
 # --- Manual management (upload / list / delete) ---
@@ -289,156 +420,3 @@ def edit_entry(entry_id: str, req: EditEntryRequest, authorized: bool = Depends(
     collection.update(ids=[entry_id], documents=[text], embeddings=[embedding])
 
     return {"status": "edited", "id": entry_id, "text": text}
-
-
-# ---------- Admin profile ----------
-
-def _get_or_create_admin_profile(db: Session) -> AdminProfile:
-    profile = db.query(AdminProfile).filter(AdminProfile.id == 1).first()
-    if not profile:
-        profile = AdminProfile(id=1, name="Admin")
-        db.add(profile)
-        db.commit()
-        db.refresh(profile)
-    return profile
-
-
-@router.get("/profile")
-def get_admin_profile(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    """Returns the admin's editable profile (display name). Login credentials stay in env."""
-    profile = _get_or_create_admin_profile(db)
-    return {"name": profile.name}
-
-
-@router.put("/profile")
-def update_admin_profile(
-    req: AdminUpdateProfileRequest,
-    authorized: bool = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Admin updates their display name. Password/username remain in environment variables."""
-    name = (req.name or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Name cannot be empty.")
-    profile = _get_or_create_admin_profile(db)
-    profile.name = name
-    db.commit()
-    db.refresh(profile)
-    return {"status": "updated", "name": profile.name}
-
-
-# ---------- Admin update worker profile ----------
-
-def _rename_worker_id(db: Session, old_id: str, new_id: str) -> None:
-    """
-    Rename a worker's primary key and cascade to all FK tables + Chroma metadata.
-    Uses insert-copy + FK rewrite + delete-old so we don't rely on ON UPDATE CASCADE.
-    """
-    if old_id == new_id:
-        return
-    existing = db.query(Worker).filter(Worker.worker_id == new_id).first()
-    if existing:
-        raise HTTPException(status_code=400, detail=f"Worker ID '{new_id}' is already taken.")
-
-    old = db.query(Worker).filter(Worker.worker_id == old_id).first()
-    if not old:
-        raise HTTPException(status_code=404, detail="Worker not found.")
-
-    # 1. Insert new row with same data
-    new_row = Worker(
-        worker_id=new_id,
-        password_hash=old.password_hash,
-        name=old.name,
-        phone=old.phone,
-        address=old.address,
-        is_approved=old.is_approved,
-    )
-    db.add(new_row)
-    db.flush()
-
-    # 2. Rewrite FK references
-    db.query(WorkerSession).filter(WorkerSession.worker_id == old_id).update(
-        {WorkerSession.worker_id: new_id}, synchronize_session=False
-    )
-    db.query(WorkerMachine).filter(WorkerMachine.worker_id == old_id).update(
-        {WorkerMachine.worker_id: new_id}, synchronize_session=False
-    )
-    db.query(Ticket).filter(Ticket.worker_id == old_id).update(
-        {Ticket.worker_id: new_id}, synchronize_session=False
-    )
-    db.query(QuestionLog).filter(QuestionLog.worker_id == old_id).update(
-        {QuestionLog.worker_id: new_id}, synchronize_session=False
-    )
-    db.query(InterviewSession).filter(InterviewSession.worker_id == old_id).update(
-        {InterviewSession.worker_id: new_id}, synchronize_session=False
-    )
-    db.query(SafetyCompletion).filter(SafetyCompletion.worker_id == old_id).update(
-        {SafetyCompletion.worker_id: new_id}, synchronize_session=False
-    )
-
-    # 3. Delete old primary row
-    db.delete(old)
-    db.flush()
-
-    # 4. Best-effort update Chroma metadata (non-fatal if Chroma is down)
-    try:
-        results = collection.get(where={"worker_id": old_id})
-        if results and results.get("ids"):
-            for i, entry_id in enumerate(results["ids"]):
-                meta = dict(results["metadatas"][i] or {})
-                meta["worker_id"] = new_id
-                collection.update(ids=[entry_id], metadatas=[meta])
-    except Exception:
-        pass  # profile update still succeeds even if vector store is unreachable
-
-
-@router.put("/workers/{worker_id}")
-def update_worker_profile(
-    worker_id: str,
-    req: AdminUpdateWorkerRequest,
-    authorized: bool = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Admin updates a worker's profile (name, phone, address, approval) and may
-    rename worker_id. Password is never changed here.
-    """
-    worker = db.query(Worker).filter(Worker.worker_id == worker_id).first()
-    if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found.")
-
-    # Apply non-id field updates first (on current row)
-    if req.name is not None:
-        name = req.name.strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="Name cannot be empty.")
-        worker.name = name
-    if req.phone is not None:
-        worker.phone = req.phone.strip() or None
-    if req.address is not None:
-        worker.address = req.address.strip() or None
-    if req.is_approved is not None:
-        worker.is_approved = bool(req.is_approved)
-
-    db.flush()
-
-    final_id = worker_id
-    if req.worker_id is not None:
-        new_id = req.worker_id.strip()
-        if not new_id:
-            raise HTTPException(status_code=400, detail="Worker ID cannot be empty.")
-        if new_id != worker_id:
-            _rename_worker_id(db, worker_id, new_id)
-            final_id = new_id
-
-    db.commit()
-
-    row = db.query(Worker).filter(Worker.worker_id == final_id).first()
-    return {
-        "status": "updated",
-        "worker_id": row.worker_id,
-        "name": row.name,
-        "phone": row.phone,
-        "address": row.address,
-        "is_approved": row.is_approved,
-    }

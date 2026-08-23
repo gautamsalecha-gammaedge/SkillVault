@@ -2,20 +2,18 @@ import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Api } from '../../lib/api';
 import { useToast } from '../../lib/toast';
+import { useI18n } from '../../lib/i18n';
+import { COUNTRY_CODES } from '../../lib/countryCodes';
 
-const inputStyle = {
-  border: '1.5px solid var(--sv-border)',
-  borderRadius: 'var(--sv-radius-md)',
-  padding: '10px 12px',
-  fontSize: 14,
-  outline: 'none',
-  background: 'var(--sv-bg)',
-  color: 'var(--sv-ink)',
-  width: '100%',
-  boxSizing: 'border-box',
+const fieldLabel = { fontSize: 12, fontWeight: 600, color: 'var(--sv-muted)', marginBottom: 6, display: 'block' };
+const fieldInput = {
+  width: '100%', border: '1.5px solid var(--sv-border)', borderRadius: 'var(--sv-radius-md)',
+  padding: '10px 12px', fontSize: 14, outline: 'none', background: 'var(--sv-bg)',
+  color: 'var(--sv-ink)', fontFamily: 'var(--sv-font-body)', boxSizing: 'border-box',
 };
 
 export default function WorkersMachines() {
+  const { t } = useI18n();
   const [workers, setWorkers] = useState([]);
   const [allMachines, setAllMachines] = useState([]);
   const [selectedWorker, setSelectedWorker] = useState(null);
@@ -23,18 +21,8 @@ export default function WorkersMachines() {
   const [busy, setBusy] = useState(false);
   const { push } = useToast();
 
-  // Profile edit form state
-  const [editId, setEditId] = useState('');
-  const [editName, setEditName] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editAddress, setEditAddress] = useState('');
-  const [editApproved, setEditApproved] = useState(false);
-  const [savingProfile, setSavingProfile] = useState(false);
-
   function loadWorkers() {
-    return Api.allWorkers()
-      .then((res) => setWorkers(res.workers || []))
-      .catch((err) => push(err.message, 'error'));
+    return Api.allWorkers().then((res) => setWorkers(res.workers || [])).catch((err) => push(err.message, 'error'));
   }
 
   useEffect(() => {
@@ -44,55 +32,16 @@ export default function WorkersMachines() {
 
   function selectWorker(w) {
     setSelectedWorker(w);
-    setEditId(w.worker_id);
-    setEditName(w.name || '');
-    setEditPhone(w.phone || '');
-    setEditAddress(w.address || '');
-    setEditApproved(!!w.is_approved);
     Api.workerMachines(w.worker_id)
       .then((res) => setAssigned(res.machine_ids || []))
       .catch((err) => push(err.message, 'error'));
   }
 
-  async function saveProfile(e) {
-    e.preventDefault();
-    if (!selectedWorker) return;
-    setSavingProfile(true);
-    try {
-      const payload = {
-        name: editName.trim(),
-        phone: editPhone.trim() || null,
-        address: editAddress.trim() || null,
-        is_approved: editApproved,
-      };
-      if (editId.trim() && editId.trim() !== selectedWorker.worker_id) {
-        payload.worker_id = editId.trim();
-      }
-      const res = await Api.updateWorkerAsAdmin(selectedWorker.worker_id, payload);
-      push('Worker profile updated.', 'success');
-      await loadWorkers();
-      // Re-select with updated data
-      const updated = {
-        worker_id: res.worker_id,
-        name: res.name,
-        phone: res.phone,
-        address: res.address,
-        is_approved: res.is_approved,
-      };
-      setSelectedWorker(updated);
-      setEditId(res.worker_id);
-      setEditName(res.name || '');
-      setEditPhone(res.phone || '');
-      setEditAddress(res.address || '');
-      setEditApproved(!!res.is_approved);
-      // Reload machines for (possibly renamed) worker
-      const machines = await Api.workerMachines(res.worker_id);
-      setAssigned(machines.machine_ids || []);
-    } catch (err) {
-      push(err.message, 'error');
-    } finally {
-      setSavingProfile(false);
-    }
+  /** Called after a successful profile save (including a worker_id rename) -
+   * refreshes the list and keeps the (possibly renamed) worker selected. */
+  async function handleProfileSaved(updatedWorker) {
+    await loadWorkers();
+    setSelectedWorker(updatedWorker);
   }
 
   async function assign(machineId) {
@@ -138,7 +87,6 @@ export default function WorkersMachines() {
                 textAlign: 'left', padding: '10px 12px', borderRadius: 'var(--sv-radius-sm)', fontSize: 14,
                 background: selectedWorker?.worker_id === w.worker_id ? 'var(--sv-brass-soft)' : 'transparent',
                 color: selectedWorker?.worker_id === w.worker_id ? 'var(--sv-brass)' : 'var(--sv-ink)',
-                border: '1px solid var(--sv-border)',
               }}
             >
               <div style={{ fontWeight: 500 }}>{w.name}</div>
@@ -150,46 +98,24 @@ export default function WorkersMachines() {
         </div>
       </div>
 
-      <div style={{ flex: 1, maxWidth: 560 }}>
+      <div style={{ flex: 1 }}>
         {!selectedWorker ? (
-          <p style={{ fontSize: 13, color: 'var(--sv-muted)', marginTop: 40 }}>Select a worker to edit profile and manage machines.</p>
+          <p style={{ fontSize: 13, color: 'var(--sv-muted)', marginTop: 40 }}>Select a worker to manage machine access.</p>
         ) : (
           <>
-            <p style={{ fontFamily: 'var(--sv-font-display)', fontWeight: 600, fontSize: 18, color: 'var(--sv-ink)', marginBottom: 4 }}>
-              {selectedWorker.name}
-            </p>
-            <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginBottom: 16 }}>
-              Edit profile (password cannot be changed here) and assign machines.
-            </p>
+            <WorkerProfileEditor
+              key={selectedWorker.worker_id}
+              worker={selectedWorker}
+              t={t}
+              push={push}
+              onSaved={handleProfileSaved}
+            />
 
-            <form onSubmit={saveProfile} className="sv-card" style={{ marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--sv-muted)' }}>Profile</p>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 12, color: 'var(--sv-muted)' }}>Worker ID</span>
-                <input style={inputStyle} value={editId} onChange={(e) => setEditId(e.target.value)} required />
-              </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 12, color: 'var(--sv-muted)' }}>Full name</span>
-                <input style={inputStyle} value={editName} onChange={(e) => setEditName(e.target.value)} required />
-              </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 12, color: 'var(--sv-muted)' }}>Phone (with country code)</span>
-                <input style={inputStyle} value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="+91 98765 43210" />
-              </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 12, color: 'var(--sv-muted)' }}>Address</span>
-                <textarea style={{ ...inputStyle, minHeight: 64, resize: 'vertical' }} value={editAddress} onChange={(e) => setEditAddress(e.target.value)} rows={2} />
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                <input type="checkbox" checked={editApproved} onChange={(e) => setEditApproved(e.target.checked)} />
-                Approved (can log in)
-              </label>
-              <button type="submit" className="sv-btn sv-btn--primary" disabled={savingProfile} style={{ alignSelf: 'flex-start', padding: '10px 18px' }}>
-                {savingProfile ? 'Saving…' : 'Save profile'}
-              </button>
-            </form>
+            <p style={{ fontFamily: 'var(--sv-font-display)', fontWeight: 600, fontSize: 18, color: 'var(--sv-ink)', marginBottom: 4, marginTop: 24 }}>
+              {selectedWorker.name}'s machines
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--sv-muted)', marginBottom: 16 }}>Assign or revoke access to specific machines.</p>
 
-            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--sv-muted)', marginBottom: 8 }}>Assigned machines</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
               {assigned.length === 0 && <p style={{ fontSize: 13, color: 'var(--sv-muted)' }}>No machines assigned yet.</p>}
               {assigned.map((m) => (
@@ -228,6 +154,92 @@ export default function WorkersMachines() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function WorkerProfileEditor({ worker, t, push, onSaved }) {
+  const [name, setName] = useState(worker.name || '');
+  const [workerId, setWorkerId] = useState(worker.worker_id || '');
+  const [countryCode, setCountryCode] = useState(worker.phone_country_code || '+91');
+  const [phoneNumber, setPhoneNumber] = useState(worker.phone_number || '');
+  const [address, setAddress] = useState(worker.address || '');
+  const [busy, setBusy] = useState(false);
+
+  async function handleSave(e) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const fields = {
+        name,
+        phone_country_code: countryCode,
+        phone_number: phoneNumber || null,
+        address: address || null,
+      };
+      if (workerId !== worker.worker_id) fields.new_worker_id = workerId;
+
+      const res = await Api.updateWorkerByAdmin(worker.worker_id, fields);
+      push(t('profileUpdated'), 'success');
+      onSaved({
+        worker_id: res.worker_id,
+        name: res.name,
+        is_approved: worker.is_approved,
+        phone_country_code: res.phone_country_code,
+        phone_number: res.phone_number,
+        address: res.address,
+      });
+    } catch (err) {
+      push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="sv-card" style={{ marginBottom: 8 }}>
+      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--sv-muted)', marginBottom: 14 }}>
+        {t('editWorkerProfileTitle').replace('{name}', worker.name)}
+      </p>
+      <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <label style={fieldLabel}>{t('nameLabel')}</label>
+          <input style={fieldInput} value={name} onChange={(e) => setName(e.target.value)} required />
+        </div>
+
+        <div>
+          <label style={fieldLabel}>{t('workerIdRenameLabel')}</label>
+          <input style={fieldInput} value={workerId} onChange={(e) => setWorkerId(e.target.value)} required />
+          {workerId !== worker.worker_id && (
+            <p style={{ fontSize: 11, color: 'var(--sv-danger)', marginTop: 4 }}>{t('workerIdRenameHint')}</p>
+          )}
+        </div>
+
+        <div>
+          <label style={fieldLabel}>{t('phoneNumberLabel')}</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <select style={{ ...fieldInput, flex: '0 0 130px' }} value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
+              {COUNTRY_CODES.map((c) => (
+                <option key={c.code} value={c.code}>{c.code}</option>
+              ))}
+            </select>
+            <input style={{ ...fieldInput, flex: 1 }} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} />
+          </div>
+        </div>
+
+        <div>
+          <label style={fieldLabel}>{t('addressLabel')}</label>
+          <input style={fieldInput} placeholder={t('addressPlaceholder')} value={address} onChange={(e) => setAddress(e.target.value)} />
+        </div>
+
+        <button
+          className="sv-btn sv-btn--primary"
+          style={{ alignSelf: 'flex-start', padding: '10px 16px', fontSize: 13, fontWeight: 600, borderRadius: 'var(--sv-radius-md)' }}
+          disabled={busy}
+          type="submit"
+        >
+          {busy ? t('savingBtn') : t('saveProfileBtn')}
+        </button>
+      </form>
     </div>
   );
 }
