@@ -39,7 +39,7 @@ function TopBar() {
         </nav>
         <div className="flex items-center gap-3">
           <Link to="/login" className="text-sm font-semibold text-muted hover:text-text transition-colors hidden sm:block">Sign in</Link>
-          <Link to="/register" className="text-sm font-semibold bg-signal text-[#06110d] px-4 py-2.5 rounded-full hover:brightness-110 transition-all shadow-[0_0_0_1px_rgba(67,229,192,.3),0_10px_30px_-10px_rgba(67,229,192,.6)]">
+          <Link to="/register" className="text-sm font-semibold bg-[#2bb89a] text-[#06110d] px-4 py-2.5 rounded-full hover:bg-[#34c9a8] transition-all shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_4px_14px_-4px_rgba(43,184,154,.35)]">
             Join the floor
           </Link>
         </div>
@@ -63,7 +63,7 @@ function Hero() {
           >
             Your best operator
             <br />
-            <span className="text-signal sv-glow-text">retires every night.</span>
+            <span className="text-[#3dcfb0]">retires every night.</span>
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.15 }}
@@ -76,7 +76,7 @@ function Hero() {
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.25 }}
             className="mt-9 flex flex-wrap items-center gap-4"
           >
-            <Link to="/register" className="group inline-flex items-center gap-2 bg-signal text-[#06110d] font-bold px-7 py-4 rounded-full hover:brightness-110 transition-all shadow-[0_0_0_1px_rgba(67,229,192,.3),0_14px_40px_-12px_rgba(67,229,192,.7)]">
+            <Link to="/register" className="group inline-flex items-center gap-2 bg-[#2bb89a] text-[#06110d] font-bold px-7 py-4 rounded-full hover:bg-[#34c9a8] transition-all shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_4px_14px_-4px_rgba(43,184,154,.35)]">
               Register as a worker
               <ArrowUpRight size={18} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
             </Link>
@@ -133,7 +133,7 @@ function HandoffOrb() {
           ))}
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="relative w-28 h-28 rounded-full bg-surface border border-signal/40 flex items-center justify-center shadow-[0_0_60px_-10px_rgba(67,229,192,.5)]">
+          <div className="relative w-28 h-28 rounded-full bg-surface border border-signal/25 flex items-center justify-center shadow-[0_0_40px_-12px_rgba(43,184,154,.28)]">
             <motion.div
               className="absolute inset-0 rounded-full border border-signal/30"
               animate={{ scale: [1, 1.5, 1], opacity: [0.6, 0, 0.6] }}
@@ -327,7 +327,7 @@ function CTA() {
         <h2 className="font-display text-4xl md:text-5xl font-bold mb-4">Don't let the next retirement erase 30 years.</h2>
         <p className="text-muted max-w-lg mx-auto mb-9">Start capturing what your best people know — before the shift ends for good.</p>
         <div className="flex flex-wrap items-center justify-center gap-4">
-          <Link to="/register" className="inline-flex items-center gap-2 bg-signal text-[#06110d] font-bold px-8 py-4 rounded-full hover:brightness-110 transition-all shadow-[0_0_0_1px_rgba(67,229,192,.3),0_14px_40px_-12px_rgba(67,229,192,.7)]">
+          <Link to="/register" className="inline-flex items-center gap-2 bg-[#2bb89a] text-[#06110d] font-bold px-8 py-4 rounded-full hover:bg-[#34c9a8] transition-all shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_4px_14px_-4px_rgba(43,184,154,.35)]">
             Register as a worker <ArrowUpRight size={18} />
           </Link>
           <Link to="/login" className="inline-flex items-center gap-2 border border-line px-8 py-4 rounded-full hover:border-signal/50 transition-all font-semibold">

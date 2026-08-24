@@ -59,7 +59,7 @@ export default function WorkerLayout() {
           <span className="font-display font-bold text-lg">SkillVault</span>
           <div className="w-6" />
         </header>
-        <main className="p-4 md:p-8 max-w-6xl mx-auto">
+        <main className="p-4 md:p-8 max-w-7xl mx-auto w-full">
           <AnimatePresence mode="wait">
             <PageTransition key={location.pathname}>
               <Outlet />

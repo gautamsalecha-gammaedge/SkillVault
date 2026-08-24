@@ -30,8 +30,8 @@
   --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  --shadow-signal: 0 0 0 1px rgba(67, 229, 192, 0.25), 0 8px 30px -8px rgba(67, 229, 192, 0.35);
-  --shadow-amber: 0 0 0 1px rgba(255, 176, 32, 0.25), 0 8px 30px -8px rgba(255, 176, 32, 0.35);
+  --shadow-signal: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 4px 14px -4px rgba(43, 184, 154, 0.32);
+  --shadow-amber: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 4px 14px -4px rgba(217, 150, 26, 0.28);
 }
 
 * { box-sizing: border-box; }
@@ -49,14 +49,34 @@ body {
   color: var(--color-text);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+  /* Soft ambient base — no hard grid on the page itself (was eye-straining).
+     Grid is kept only as a very faint texture via ::after so the Blueprint
+     identity remains without the visual noise. */
   background-image:
-    linear-gradient(var(--color-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
-  background-size: 56px 56px;
+    radial-gradient(ellipse 120% 80% at 50% -20%, rgba(67, 229, 192, 0.06), transparent 55%),
+    radial-gradient(ellipse 90% 60% at 100% 0%, rgba(255, 176, 32, 0.04), transparent 50%),
+    radial-gradient(ellipse 100% 70% at 0% 100%, rgba(67, 229, 192, 0.04), transparent 55%),
+    linear-gradient(180deg, #0b1220 0%, #0a101c 40%, #09101a 100%);
   background-attachment: fixed;
-  background-position: center top;
   position: relative;
   margin: 0;
+}
+
+/* Extremely subtle blueprint grid — low opacity so it reads as texture, not lines */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(34, 50, 82, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 50, 82, 0.18) 1px, transparent 1px);
+  background-size: 64px 64px;
+  background-position: center top;
+  opacity: 0.35;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, black 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, black 20%, transparent 75%);
 }
 
 body::before {
@@ -66,9 +86,9 @@ body::before {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(60% 40% at 15% 0%, rgba(67, 229, 192, 0.10), transparent 60%),
-    radial-gradient(50% 35% at 100% 10%, rgba(255, 176, 32, 0.07), transparent 60%),
-    radial-gradient(80% 60% at 50% 100%, rgba(67, 229, 192, 0.05), transparent 60%);
+    radial-gradient(50% 35% at 20% 10%, rgba(67, 229, 192, 0.07), transparent 65%),
+    radial-gradient(40% 30% at 90% 15%, rgba(255, 176, 32, 0.05), transparent 60%),
+    radial-gradient(70% 50% at 50% 110%, rgba(67, 229, 192, 0.04), transparent 60%);
 }
 
 #root { position: relative; z-index: 1; }
@@ -104,12 +124,12 @@ a { color: inherit; }
 
 .sv-grid-tile {
   background-image:
-    linear-gradient(var(--color-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+    linear-gradient(rgba(34, 50, 82, 0.22) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 50, 82, 0.22) 1px, transparent 1px);
   background-size: 28px 28px;
 }
 
-.sv-glow-text { text-shadow: 0 0 30px rgba(67, 229, 192, 0.35); }
+.sv-glow-text { text-shadow: 0 0 18px rgba(43, 184, 154, 0.18); }
 
 @keyframes sv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .sv-pulse { animation: sv-pulse 1.6s ease-in-out infinite; }

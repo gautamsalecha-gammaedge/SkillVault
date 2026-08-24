@@ -48,8 +48,8 @@ export default function MicButton({ onResult, size = 64, label = true }) {
           disabled={busy}
           style={{ width: size, height: size }}
           className={`relative rounded-full flex items-center justify-center transition-colors duration-300 ${
-            recording ? 'bg-danger text-white' : 'bg-signal text-[#06110d]'
-          } shadow-[0_10px_40px_-10px_rgba(67,229,192,0.6)] disabled:opacity-60`}
+            recording ? 'bg-danger text-white' : 'bg-[#2bb89a] text-[#06110d]'
+          } shadow-[0_4px_16px_-4px_rgba(43,184,154,0.35)] disabled:opacity-60`}
         >
           {busy ? <Loader2 className="animate-spin" size={size * 0.36} /> : recording ? <Square size={size * 0.32} /> : <Mic size={size * 0.4} />}
         </motion.button>

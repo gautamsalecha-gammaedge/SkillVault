@@ -29,15 +29,21 @@ export default function AdminProfile() {
   if (loading) return null;
 
   return (
-    <div className="max-w-xl mx-auto">
+    <div>
       <PageHeader eyebrow="Account" title="Admin profile" description="Your display name — login credentials are managed outside the app." />
-      <Card className="p-7">
-        <form onSubmit={save} className="space-y-4">
-          <Input label="Username" value={username} disabled className="opacity-60" />
-          <Input label="Display name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Button type="submit" variant="amber" loading={saving}>Save changes</Button>
-        </form>
-      </Card>
+      <div className="grid lg:grid-cols-[1fr_280px] gap-6 items-start">
+        <Card className="p-7 max-w-xl">
+          <form onSubmit={save} className="space-y-4">
+            <Input label="Username" value={username} disabled className="opacity-60" />
+            <Input label="Display name" value={name} onChange={(e) => setName(e.target.value)} />
+            <Button type="submit" variant="amber" loading={saving}>Save changes</Button>
+          </form>
+        </Card>
+        <aside className="sv-card p-5 space-y-3 text-sm text-muted leading-snug">
+          <p className="font-mono text-[11px] uppercase tracking-widest text-muted">Note</p>
+          <p>Username and password are set in the server environment. Only your display name is editable here.</p>
+        </aside>
+      </div>
     </div>
   );
 }
