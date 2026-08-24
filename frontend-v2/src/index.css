@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+/* ============================================================
+   SkillVault Design System — "Blueprint" direction.
+   Subject: an industrial AI system that captures the tacit
+   knowledge of senior machine operators and turns it into a
+   searchable, voice-first knowledge base for every worker.
+
+   Palette: bg #0B1220, surface #121B2E, line #223252,
+   signal(teal) #43E5C0, amber #FFB020, danger #FF5D5D,
+   text #EAF0FA, muted #8B9AB8.
+   Type: display "Big Shoulders Display", body "Inter",
+   mono "JetBrains Mono".
+   ============================================================ */
+
+@theme {
+  --color-bg: #0b1220;
+  --color-surface: #121b2e;
+  --color-surface-2: #17223a;
+  --color-surface-3: #1d2a45;
+  --color-line: #223252;
+  --color-signal: #43e5c0;
+  --color-signal-dim: #2c9e83;
+  --color-amber: #ffb020;
+  --color-danger: #ff5d5d;
+  --color-text: #eaf0fa;
+  --color-muted: #8b9ab8;
+
+  --font-display: "Big Shoulders Display", "Inter", sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --shadow-signal: 0 0 0 1px rgba(67, 229, 192, 0.25), 0 8px 30px -8px rgba(67, 229, 192, 0.35);
+  --shadow-amber: 0 0 0 1px rgba(255, 176, 32, 0.25), 0 8px 30px -8px rgba(255, 176, 32, 0.35);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+
+:root, body { color-scheme: dark; }
+/* Forces native browser chrome — <select> dropdowns, date pickers,
+   scrollbars, autofill, form validation bubbles — to render in dark
+   variants instead of falling back to the OS/browser light default.
+   Without this, every dropdown in the app would flash white-on-black
+   the moment it's opened, regardless of how the trigger is styled. */
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    linear-gradient(var(--color-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  background-attachment: fixed;
+  background-position: center top;
+  position: relative;
+  margin: 0;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(60% 40% at 15% 0%, rgba(67, 229, 192, 0.10), transparent 60%),
+    radial-gradient(50% 35% at 100% 10%, rgba(255, 176, 32, 0.07), transparent 60%),
+    radial-gradient(80% 60% at 50% 100%, rgba(67, 229, 192, 0.05), transparent 60%);
+}
+
+#root { position: relative; z-index: 1; }
+::selection { background: var(--color-signal); color: #06110d; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-signal-dim); }
+
+h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: 0.01em; }
+.font-mono { font-family: var(--font-mono); }
+a { color: inherit; }
+
+.sv-card {
+  position: relative;
+  background: linear-gradient(180deg, var(--color-surface), var(--color-surface-2) 140%);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+.sv-card::before, .sv-card::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: var(--color-signal);
+  opacity: 0.55;
+  transition: opacity .25s ease, width .25s ease, height .25s ease;
+  pointer-events: none;
+}
+.sv-card::before { top: -1px; left: -1px; border-top: 2px solid; border-left: 2px solid; border-top-left-radius: 6px; }
+.sv-card::after { bottom: -1px; right: -1px; border-bottom: 2px solid; border-right: 2px solid; border-bottom-right-radius: 6px; }
+.sv-card:hover::before, .sv-card:hover::after { opacity: 1; width: 20px; height: 20px; }
+
+.sv-grid-tile {
+  background-image:
+    linear-gradient(var(--color-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.sv-glow-text { text-shadow: 0 0 30px rgba(67, 229, 192, 0.35); }
+
+@keyframes sv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.sv-pulse { animation: sv-pulse 1.6s ease-in-out infinite; }
+
+@keyframes sv-drift { 0% { background-position: 0 0; } 100% { background-position: 56px 56px; } }
+.sv-drift-grid { animation: sv-drift 6s linear infinite; }
+
+@keyframes sv-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+.sv-rise { animation: sv-rise .6s cubic-bezier(.16,.8,.24,1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+input, textarea, select, button { font-family: inherit; }
+
+/* Belt-and-braces for <option> rendering: color-scheme handles most
+   engines, but some older Firefox/WebKit builds still need explicit
+   colors on the option list itself. */
+select { background-color: var(--color-surface-2); color: var(--color-text); }
+select option { background-color: var(--color-surface-2); color: var(--color-text); }
+
+.sv-scrollbar-none::-webkit-scrollbar { display: none; }
+.sv-scrollbar-none { scrollbar-width: none; }
