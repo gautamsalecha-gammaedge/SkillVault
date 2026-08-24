@@ -15,7 +15,6 @@ import SafetyBriefing from './pages/worker/SafetyBriefing';
 import AddTip from './pages/worker/AddTip';
 import MyTips from './pages/worker/MyTips';
 import Interview from './pages/worker/Interview';
-import RaiseTicket from './pages/worker/RaiseTicket';
 import MyTickets from './pages/worker/MyTickets';
 import WorkerSettings from './pages/worker/Settings';
 
@@ -43,7 +42,7 @@ export default function App() {
         <Route path="add-tip" element={<AddTip />} />
         <Route path="my-tips" element={<MyTips />} />
         <Route path="interview" element={<Interview />} />
-        <Route path="raise-ticket" element={<RaiseTicket />} />
+        <Route path="raise-ticket" element={<Navigate to="/worker/my-tickets" replace />} />
         <Route path="my-tickets" element={<MyTickets />} />
         <Route path="settings" element={<WorkerSettings />} />
       </Route>

@@ -58,11 +58,11 @@ export default function Login() {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Left panel — branding / value prop (desktop) */}
-      <aside className="hidden lg:flex lg:w-[40%] xl:w-[38%] relative flex-col justify-between p-10 xl:p-12 border-r border-line bg-surface/40">
+      <aside className="hidden lg:flex lg:w-[40%] xl:w-[38%] relative flex-col justify-between p-10 xl:p-12 border-r border-line bg-[#fffcf8]/95">
         <div className="absolute inset-0 pointer-events-none opacity-40"
           style={{
             backgroundImage:
-              'linear-gradient(rgba(34,50,82,0.25) 1px, transparent 1px), linear-gradient(90deg, rgba(34,50,82,0.25) 1px, transparent 1px)',
+              'linear-gradient(rgba(180,160,140,0.28) 1px, transparent 1px), linear-gradient(90deg, rgba(180,160,140,0.28) 1px, transparent 1px)',
             backgroundSize: '48px 48px',
             maskImage: 'radial-gradient(ellipse 70% 60% at 30% 40%, black, transparent)',
             WebkitMaskImage: 'radial-gradient(ellipse 70% 60% at 30% 40%, black, transparent)',
@@ -80,7 +80,7 @@ export default function Login() {
         <div className="relative space-y-5 mt-12">
           {HIGHLIGHTS.map(({ icon: Icon, title, body }) => (
             <div key={title} className="flex gap-4 items-start">
-              <div className="w-10 h-10 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-[#2bb89a] shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-[var(--color-signal)] shrink-0">
                 <Icon size={18} />
               </div>
               <div>
@@ -108,13 +108,13 @@ export default function Login() {
           <div className="flex p-1.5 rounded-full bg-surface-2 border border-line mb-8">
             <button
               onClick={() => setMode('worker')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-full text-sm font-semibold transition-all ${mode === 'worker' ? 'bg-[#2bb89a] text-[#06110d]' : 'text-muted hover:text-text'}`}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-full text-sm font-semibold transition-all ${mode === 'worker' ? 'bg-[var(--color-signal)] text-white' : 'text-muted hover:text-text'}`}
             >
               <HardHat size={16} /> Worker
             </button>
             <button
               onClick={() => setMode('admin')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-full text-sm font-semibold transition-all ${mode === 'admin' ? 'bg-[#d9961a] text-[#221400]' : 'text-muted hover:text-text'}`}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-full text-sm font-semibold transition-all ${mode === 'admin' ? 'bg-amber text-white' : 'text-muted hover:text-text'}`}
             >
               <UserCog size={16} /> Admin
             </button>
@@ -137,7 +137,7 @@ export default function Login() {
                 <Input label="Password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 <Button type="submit" size="lg" className="w-full mt-1" loading={loading}>Sign in</Button>
                 <p className="text-center text-sm text-muted pt-2">
-                  New here? <Link to="/register" className="text-[#2bb89a] font-semibold hover:underline">Register as a worker</Link>
+                  New here? <Link to="/register" className="text-[var(--color-signal)] font-semibold hover:underline">Register as a worker</Link>
                 </p>
               </form>
             ) : (

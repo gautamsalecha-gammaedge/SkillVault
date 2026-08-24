@@ -15,8 +15,7 @@ const NAV = [
   { to: '/worker/add-tip', label: 'Add a Tip', icon: PlusCircle },
   { to: '/worker/my-tips', label: 'My Tips', icon: ListChecks },
   { to: '/worker/interview', label: 'Tacit Interview', icon: Mic2 },
-  { to: '/worker/raise-ticket', label: 'Raise a Ticket', icon: Ticket },
-  { to: '/worker/my-tickets', label: 'My Tickets', icon: BookOpenCheck },
+  { to: '/worker/my-tickets', label: 'Tickets', icon: Ticket },
   { to: '/worker/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -122,7 +121,7 @@ export function Brand() {
   return (
     <div className="flex items-center gap-2.5">
       <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-signal to-signal-dim flex items-center justify-center shrink-0">
-        <div className="w-2.5 h-2.5 rounded-full bg-[#06110d]" />
+        <div className="w-2.5 h-2.5 rounded-full bg-white" />
       </div>
       <span className="font-display font-bold text-lg tracking-tight">SkillVault</span>
     </div>

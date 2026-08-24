@@ -28,7 +28,7 @@ function TopBar() {
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-signal to-signal-dim flex items-center justify-center">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#06110d]" />
+            <div className="w-2.5 h-2.5 rounded-full bg-white" />
           </div>
           <span className="font-display font-bold text-lg tracking-tight">SkillVault</span>
         </div>
@@ -39,7 +39,7 @@ function TopBar() {
         </nav>
         <div className="flex items-center gap-3">
           <Link to="/login" className="text-sm font-semibold text-muted hover:text-text transition-colors hidden sm:block">Sign in</Link>
-          <Link to="/register" className="text-sm font-semibold bg-[#2bb89a] text-[#06110d] px-4 py-2.5 rounded-full hover:bg-[#34c9a8] transition-all shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_4px_14px_-4px_rgba(43,184,154,.35)]">
+          <Link to="/register" className="text-sm font-semibold bg-[var(--color-signal)] text-white px-4 py-2.5 rounded-full hover:bg-signal-dim transition-all shadow-[0_1px_0_rgba(255,255,255,.25)_inset,0_6px_18px_-6px_rgba(13,159,138,.35)]">
             Join the floor
           </Link>
         </div>
@@ -63,7 +63,7 @@ function Hero() {
           >
             Your best operator
             <br />
-            <span className="text-[#3dcfb0]">retires every night.</span>
+            <span className="text-signal">retires every night.</span>
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.15 }}
@@ -76,7 +76,7 @@ function Hero() {
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.25 }}
             className="mt-9 flex flex-wrap items-center gap-4"
           >
-            <Link to="/register" className="group inline-flex items-center gap-2 bg-[#2bb89a] text-[#06110d] font-bold px-7 py-4 rounded-full hover:bg-[#34c9a8] transition-all shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_4px_14px_-4px_rgba(43,184,154,.35)]">
+            <Link to="/register" className="group inline-flex items-center gap-2 bg-[var(--color-signal)] text-white font-bold px-7 py-4 rounded-full hover:bg-signal-dim transition-all shadow-[0_1px_0_rgba(255,255,255,.25)_inset,0_6px_18px_-6px_rgba(13,159,138,.35)]">
               Register as a worker
               <ArrowUpRight size={18} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
             </Link>
@@ -96,11 +96,6 @@ function Hero() {
   );
 }
 
-/* ---------------- Signature hero animation ----------------
-   "The Handoff" — a spoken waveform crystallizes into knowledge
-   nodes on a blueprint lattice, echoing the corner-bracket motif
-   used on every card across the product. This is the one bold
-   visual risk on the page; everything else stays disciplined. */
 function HandoffOrb() {
   const bars = Array.from({ length: 28 });
   const nodes = [
@@ -118,13 +113,13 @@ function HandoffOrb() {
             <g key={i}>
               <motion.line
                 x1="50" y1="50" x2={n.x} y2={n.y}
-                stroke="#43E5C0" strokeWidth="0.4"
+                stroke="#0f9d8a" strokeWidth="0.4"
                 initial={{ pathLength: 0, opacity: 0 }}
                 animate={{ pathLength: 1, opacity: 0.5 }}
                 transition={{ duration: 1.2, delay: 0.8 + i * 0.12, ease: 'easeOut' }}
               />
               <motion.circle
-                cx={n.x} cy={n.y} r="2.2" fill="#0B1220" stroke="#43E5C0" strokeWidth="0.6"
+                cx={n.x} cy={n.y} r="2.2" fill="#fffcf8" stroke="#0f9d8a" strokeWidth="0.6"
                 initial={{ scale: 0, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ duration: 0.5, delay: 1.4 + i * 0.12 }}
@@ -133,7 +128,7 @@ function HandoffOrb() {
           ))}
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="relative w-28 h-28 rounded-full bg-surface border border-signal/25 flex items-center justify-center shadow-[0_0_40px_-12px_rgba(43,184,154,.28)]">
+          <div className="relative w-28 h-28 rounded-full bg-surface border border-signal/25 flex items-center justify-center shadow-[0_8px_30px_-10px_rgba(13,159,138,.25)]">
             <motion.div
               className="absolute inset-0 rounded-full border border-signal/30"
               animate={{ scale: [1, 1.5, 1], opacity: [0.6, 0, 0.6] }}
@@ -327,7 +322,7 @@ function CTA() {
         <h2 className="font-display text-4xl md:text-5xl font-bold mb-4">Don't let the next retirement erase 30 years.</h2>
         <p className="text-muted max-w-lg mx-auto mb-9">Start capturing what your best people know — before the shift ends for good.</p>
         <div className="flex flex-wrap items-center justify-center gap-4">
-          <Link to="/register" className="inline-flex items-center gap-2 bg-[#2bb89a] text-[#06110d] font-bold px-8 py-4 rounded-full hover:bg-[#34c9a8] transition-all shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_4px_14px_-4px_rgba(43,184,154,.35)]">
+          <Link to="/register" className="inline-flex items-center gap-2 bg-[var(--color-signal)] text-white font-bold px-8 py-4 rounded-full hover:bg-signal-dim transition-all shadow-[0_1px_0_rgba(255,255,255,.25)_inset,0_6px_18px_-6px_rgba(13,159,138,.35)]">
             Register as a worker <ArrowUpRight size={18} />
           </Link>
           <Link to="/login" className="inline-flex items-center gap-2 border border-line px-8 py-4 rounded-full hover:border-signal/50 transition-all font-semibold">

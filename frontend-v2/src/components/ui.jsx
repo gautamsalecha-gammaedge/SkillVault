@@ -12,12 +12,11 @@ export function Card({ children, className = '', hover = true, ...rest }) {
 export function Button({ children, variant = 'primary', size = 'md', className = '', loading = false, icon: Icon, ...rest }) {
   const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2.5 text-sm', lg: 'px-6 py-3.5 text-base' };
   const variants = {
-    /* Softer primary: muted teal fill + tight soft edge, no neon bloom */
-    primary: 'bg-[#2bb89a] text-[#06110d] hover:bg-[#34c9a8] shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_4px_14px_-4px_rgba(43,184,154,.35)]',
-    amber: 'bg-[#d9961a] text-[#221400] hover:bg-[#e5a628] shadow-[0_1px_0_rgba(255,255,255,.1)_inset,0_4px_14px_-4px_rgba(217,150,26,.3)]',
-    ghost: 'bg-surface-2 text-text border border-line hover:border-signal/40 hover:text-signal',
+    primary: 'bg-signal text-white hover:bg-signal-dim shadow-[0_1px_0_rgba(255,255,255,.25)_inset,0_6px_18px_-6px_rgba(13,159,138,.4)]',
+    amber: 'bg-amber text-white hover:brightness-105 shadow-[0_1px_0_rgba(255,255,255,.2)_inset,0_6px_18px_-6px_rgba(232,145,15,.35)]',
+    ghost: 'bg-surface-2 text-text border border-line hover:border-signal/50 hover:text-signal',
     outline: 'bg-transparent text-text border border-line hover:border-signal/50',
-    danger: 'bg-danger/15 text-danger border border-danger/40 hover:bg-danger/25',
+    danger: 'bg-danger/10 text-danger border border-danger/30 hover:bg-danger/20',
     subtle: 'bg-transparent text-muted hover:text-text',
   };
   return (
@@ -53,7 +52,7 @@ export function Input({ label, hint, error, className = '', ...rest }) {
     <label className="block">
       {label && <span className="block text-xs font-semibold text-muted mb-1.5 uppercase tracking-wide">{label}</span>}
       <input
-        className={`w-full bg-surface-2 border border-line rounded-xl px-4 py-3.5 text-[15px] text-text placeholder:text-muted/60 outline-none focus:border-[#2bb89a] focus:ring-2 focus:ring-[#2bb89a]/20 transition-all ${className}`}
+        className={`w-full bg-surface-2 border border-line rounded-xl px-4 py-3.5 text-[15px] text-text placeholder:text-muted/50 outline-none focus:border-signal focus:ring-2 focus:ring-signal/15 transition-all ${className}`}
         {...rest}
       />
       {hint && !error && <span className="block text-xs text-muted mt-1.5">{hint}</span>}
@@ -67,7 +66,7 @@ export function Textarea({ label, hint, className = '', ...rest }) {
     <label className="block">
       {label && <span className="block text-xs font-semibold text-muted mb-1.5 uppercase tracking-wide">{label}</span>}
       <textarea
-        className={`w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-sm text-text placeholder:text-muted/60 outline-none focus:border-signal focus:ring-2 focus:ring-signal/20 transition-all resize-none ${className}`}
+        className={`w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-sm text-text placeholder:text-muted/50 outline-none focus:border-signal focus:ring-2 focus:ring-signal/15 transition-all resize-none ${className}`}
         {...rest}
       />
       {hint && <span className="block text-xs text-muted mt-1.5">{hint}</span>}
@@ -80,7 +79,7 @@ export function Select({ label, className = '', children, ...rest }) {
     <label className="block">
       {label && <span className="block text-xs font-semibold text-muted mb-1.5 uppercase tracking-wide">{label}</span>}
       <select
-        className={`w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-sm text-text outline-none focus:border-signal focus:ring-2 focus:ring-signal/20 transition-all ${className}`}
+        className={`w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-sm text-text outline-none focus:border-signal focus:ring-2 focus:ring-signal/15 transition-all ${className}`}
         {...rest}
       >
         {children}
@@ -119,7 +118,7 @@ export function EmptyState({ icon: Icon, title, description, action }) {
   return (
     <div className="sv-card sv-grid-tile px-8 py-16 md:py-20 text-center flex flex-col items-center gap-3 min-h-[280px] justify-center">
       {Icon && (
-        <div className="w-16 h-16 rounded-2xl bg-surface-3 border border-line flex items-center justify-center text-[#2bb89a] mb-2">
+        <div className="w-16 h-16 rounded-2xl bg-signal/10 border border-signal/25 flex items-center justify-center text-signal mb-2">
           <Icon size={28} />
         </div>
       )}

@@ -38,7 +38,7 @@ export default function Register() {
   if (result) {
     return (
       <div className="min-h-screen flex flex-col lg:flex-row">
-        <aside className="hidden lg:flex lg:w-[40%] xl:w-[38%] relative flex-col justify-center p-10 xl:p-12 border-r border-line bg-surface/40">
+        <aside className="hidden lg:flex lg:w-[40%] xl:w-[38%] relative flex-col justify-center p-10 xl:p-12 border-r border-line bg-[#fffcf8]/95">
           <Brand />
           <h1 className="font-display font-black text-4xl xl:text-5xl leading-[1.05] tracking-tight mt-10 max-w-md">
             You're on the list.
@@ -49,14 +49,14 @@ export default function Register() {
         </aside>
         <div className="flex-1 flex items-center justify-center px-6 py-12">
           <Card className="w-full max-w-lg p-8 sm:p-10 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-[#2bb89a]/10 border border-[#2bb89a]/30 flex items-center justify-center text-[#2bb89a] mx-auto mb-5">
+            <div className="w-14 h-14 rounded-2xl bg-[var(--color-signal)]/10 border border-[var(--color-signal)]/30 flex items-center justify-center text-[var(--color-signal)] mx-auto mb-5">
               <PartyPopper size={26} />
             </div>
             <h2 className="font-display text-2xl font-bold mb-2">You're registered, {result.name}.</h2>
             <p className="text-muted text-sm mb-6">Your Worker ID is your login. Save it — an admin needs to approve your account before you can sign in.</p>
             <div className="sv-card bg-surface-3 py-4 mb-6">
               <p className="text-[11px] font-mono uppercase tracking-widest text-muted mb-1">Your Worker ID</p>
-              <p className="font-mono text-3xl font-bold text-[#2bb89a]">{result.worker_id}</p>
+              <p className="font-mono text-3xl font-bold text-[var(--color-signal)]">{result.worker_id}</p>
             </div>
             <Button onClick={() => nav('/login')} className="w-full">Go to sign-in</Button>
           </Card>
@@ -68,11 +68,11 @@ export default function Register() {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Left panel */}
-      <aside className="hidden lg:flex lg:w-[40%] xl:w-[38%] relative flex-col justify-between p-10 xl:p-12 border-r border-line bg-surface/40">
+      <aside className="hidden lg:flex lg:w-[40%] xl:w-[38%] relative flex-col justify-between p-10 xl:p-12 border-r border-line bg-[#fffcf8]/95">
         <div className="absolute inset-0 pointer-events-none opacity-40"
           style={{
             backgroundImage:
-              'linear-gradient(rgba(34,50,82,0.25) 1px, transparent 1px), linear-gradient(90deg, rgba(34,50,82,0.25) 1px, transparent 1px)',
+              'linear-gradient(rgba(180,160,140,0.28) 1px, transparent 1px), linear-gradient(90deg, rgba(180,160,140,0.28) 1px, transparent 1px)',
             backgroundSize: '48px 48px',
             maskImage: 'radial-gradient(ellipse 70% 60% at 30% 40%, black, transparent)',
             WebkitMaskImage: 'radial-gradient(ellipse 70% 60% at 30% 40%, black, transparent)',
@@ -90,12 +90,12 @@ export default function Register() {
         <div className="relative space-y-6 mt-12">
           {STEPS.map(({ icon: Icon, title, body }, i) => (
             <div key={title} className="flex gap-4 items-start">
-              <div className="w-10 h-10 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-[#2bb89a] shrink-0 font-mono text-xs font-bold">
+              <div className="w-10 h-10 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-[var(--color-signal)] shrink-0 font-mono text-xs font-bold">
                 {i + 1}
               </div>
               <div>
                 <p className="font-semibold text-sm text-text flex items-center gap-2">
-                  <Icon size={14} className="text-[#2bb89a]" /> {title}
+                  <Icon size={14} className="text-[var(--color-signal)]" /> {title}
                 </p>
                 <p className="text-muted text-sm mt-0.5 leading-snug">{body}</p>
               </div>
@@ -130,7 +130,7 @@ export default function Register() {
               <Button type="submit" size="lg" className="w-full mt-1" loading={loading}>Create my account</Button>
             </form>
             <p className="text-center text-sm text-muted mt-6">
-              Already registered? <Link to="/login" className="text-[#2bb89a] font-semibold hover:underline">Sign in</Link>
+              Already registered? <Link to="/login" className="text-[var(--color-signal)] font-semibold hover:underline">Sign in</Link>
             </p>
           </Card>
         </div>
