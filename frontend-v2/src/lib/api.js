@@ -107,12 +107,14 @@ function transcribeXhr(audioBlob, filename = 'audio.webm') {
   return xhr('/transcribe', form, { authKind: 'worker' });
 }
 
-function addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress) {
+function addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress, imageFile) {
   const form = new FormData();
   form.append('text', text);
   form.append('machine_id', machine_id);
   form.append('language_code', language_code);
   if (videoFile) form.append('video', videoFile);
+  // Image field for future backend support — ignored by current API until implemented
+  if (imageFile) form.append('image', imageFile);
   return xhr('/Knowledge/add-knowledge', form, { authKind: 'worker', onProgress });
 }
 
@@ -175,8 +177,8 @@ export const api = {
   ask: (question, machine_id) => apiFetch('/ask', { method: 'POST', auth: 'worker', body: { question, machine_id } }),
   checkKnowledge: (text, machine_id, round, language_code) =>
     apiFetch('/Knowledge/add-knowledge/check', { method: 'POST', auth: 'worker', body: { text, machine_id, round, language_code } }),
-  addKnowledge: (text, machine_id, language_code, videoFile = null, onProgress = null) =>
-    addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress),
+  addKnowledge: (text, machine_id, language_code, videoFile = null, onProgress = null, imageFile = null) =>
+    addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress, imageFile),
   speak: (text, language_code) => apiFetchBinary('/speak', { body: { text, language_code } }),
   transcribe: (audioBlob, filename) => transcribeXhr(audioBlob, filename),
 

@@ -12,7 +12,6 @@ import Overview from './pages/worker/Overview';
 import Ask from './pages/worker/Ask';
 import Safety from './pages/worker/Safety';
 import SafetyBriefing from './pages/worker/SafetyBriefing';
-import AddTip from './pages/worker/AddTip';
 import MyTips from './pages/worker/MyTips';
 import Interview from './pages/worker/Interview';
 import MyTickets from './pages/worker/MyTickets';
@@ -39,7 +38,7 @@ export default function App() {
         <Route path="ask" element={<Ask />} />
         <Route path="safety" element={<Safety />} />
         <Route path="safety/:machineId" element={<SafetyBriefing />} />
-        <Route path="add-tip" element={<AddTip />} />
+        <Route path="add-tip" element={<Navigate to="/worker/my-tips" replace />} />
         <Route path="my-tips" element={<MyTips />} />
         <Route path="interview" element={<Interview />} />
         <Route path="raise-ticket" element={<Navigate to="/worker/my-tickets" replace />} />
