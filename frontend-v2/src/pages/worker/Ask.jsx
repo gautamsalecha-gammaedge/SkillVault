@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send, Sparkles, Factory, Video, Mic, Square, Loader2,
-  Volume2, BookOpen, User, Bot,
+  Volume2, BookOpen, User, Bot, Image as ImageIcon, X, Paperclip, Camera,
 } from 'lucide-react';
 import { api, mediaUrl, ApiError } from '../../lib/api';
 import { Select, EmptyState, Button, Card } from '../../components/ui';
@@ -20,6 +20,13 @@ export default function Ask() {
   const [thread, setThread] = useState([]);
   const [asking, setAsking] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(true);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const imageInputRef = useRef(null);
+  const cameraVideoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
 
   const [listening, setListening] = useState(false);
   const [liveCaption, setLiveCaption] = useState('');
@@ -44,6 +51,7 @@ export default function Ask() {
     return () => {
       stopListening();
       stopSpeak();
+      stopCamera();
     };
   }, []);
 
@@ -194,17 +202,106 @@ export default function Ask() {
     else startListening();
   };
 
+  const clearImage = () => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(null);
+    setImagePreview(null);
+  };
+
+  const onImagePick = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith('image/')) {
+      toast.error('Please choose an image file (JPEG, PNG, WebP).');
+      e.target.value = '';
+      return;
+    }
+    if (f.size > 15 * 1024 * 1024) {
+      toast.error('Image is too large (max 15 MB).');
+      e.target.value = '';
+      return;
+    }
+    stopCamera();
+    clearImage();
+    setImageFile(f);
+    setImagePreview(URL.createObjectURL(f));
+    e.target.value = '';
+  };
+
+  const stopCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+    }
+    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
+    setCameraOpen(false);
+  };
+
+  const openCamera = async () => {
+    if (listening) await finishListening();
+    stopCamera();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      setCameraOpen(true);
+      requestAnimationFrame(() => {
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          cameraVideoRef.current.play().catch(() => {});
+        }
+      });
+    } catch (_) {
+      toast.error('Camera access denied or unavailable.');
+      setCameraOpen(false);
+    }
+  };
+
+  const capturePhoto = () => {
+    const video = cameraVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        toast.error('Could not capture photo.');
+        return;
+      }
+      clearImage();
+      const file = new File([blob], `ask-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      setImageFile(file);
+      setImagePreview(URL.createObjectURL(blob));
+      stopCamera();
+    }, 'image/jpeg', 0.92);
+  };
+
+
   const ask = async (text) => {
     const q = (text || question).trim();
-    if (!q || !machineId || asking) return;
+    if ((!q && !imageFile) || !machineId || asking) return;
     if (listening) await finishListening();
 
     const id = Date.now();
-    setThread((t) => [...t, { id: `w-${id}`, role: 'worker', text: q }]);
+    const attached = imageFile;
+    const preview = imagePreview;
+    setThread((t) => [
+      ...t,
+      {
+        id: `w-${id}`,
+        role: 'worker',
+        text: q || '(Photo of the issue)',
+        imagePreview: preview || null,
+      },
+    ]);
     setQuestion('');
+    clearImage();
     setAsking(true);
     try {
-      const res = await api.ask(q, machineId);
+      const res = await api.ask(q, machineId, attached);
       const aiId = `a-${id}`;
       const answer = res.answer || 'No answer returned.';
       setThread((t) => [
@@ -309,6 +406,20 @@ export default function Ask() {
                     <p className={`text-sm leading-relaxed whitespace-pre-wrap ${m.role === 'worker' ? 'text-white' : 'text-text'}`}>
                       {m.text}
                     </p>
+                    {m.imagePreview && (
+                      <button
+                        type="button"
+                        onClick={() => setLightboxSrc(m.imagePreview)}
+                        className="mt-2 block max-w-full text-left"
+                        title="View full image"
+                      >
+                        <img
+                          src={m.imagePreview}
+                          alt="Attached"
+                          className="max-h-40 rounded-xl border border-white/20 object-contain cursor-zoom-in hover:opacity-95 transition-opacity"
+                        />
+                      </button>
+                    )}
                     {m.role === 'ai' && (
                       <div className="mt-3 pt-2 border-t border-line flex flex-wrap items-center gap-2">
                         <button
@@ -370,6 +481,64 @@ export default function Ask() {
 
           {/* Composer */}
           <div className="shrink-0 pt-3 border-t-2 border-line">
+
+            {cameraOpen && (
+              <div className="mb-3 relative rounded-2xl overflow-hidden border-2 border-line bg-black aspect-video max-h-56">
+                <video
+                  ref={cameraVideoRef}
+                  muted
+                  playsInline
+                  autoPlay
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+                <div className="absolute bottom-3 inset-x-0 flex justify-center gap-3 z-10">
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="px-4 py-2 rounded-full text-sm font-semibold bg-black/70 text-white border border-white/30"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={capturePhoto}
+                    className="w-14 h-14 rounded-full bg-white border-4 border-amber flex items-center justify-center shadow-lg"
+                    title="Take photo"
+                    aria-label="Take photo"
+                  >
+                    <Camera size={22} className="text-amber" />
+                  </button>
+                </div>
+                <span className="absolute top-3 left-3 z-10 text-[11px] font-semibold text-white bg-black/55 px-2.5 py-1 rounded-full">
+                  Camera
+                </span>
+              </div>
+            )}
+
+            {imagePreview && (
+              <div className="mb-2 relative inline-block">
+                <button
+                  type="button"
+                  onClick={() => setLightboxSrc(imagePreview)}
+                  title="View full image"
+                  className="block"
+                >
+                  <img
+                    src={imagePreview}
+                    alt="Attached"
+                    className="h-20 rounded-xl border-2 border-line object-cover cursor-zoom-in hover:opacity-95 transition-opacity"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={clearImage}
+                  className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-danger text-white flex items-center justify-center shadow"
+                  aria-label="Remove image"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
             {(listening || liveCaption || transcribing) && (
               <div className="mb-2 px-3 py-2 rounded-xl bg-surface-2 border-2 border-danger/25 text-sm">
                 {transcribing ? (
@@ -386,6 +555,39 @@ export default function Ask() {
             )}
 
             <div className="flex items-end gap-3">
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={onImagePick}
+              />
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={asking || listening || cameraOpen}
+                title="Upload a photo from files"
+                className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all disabled:opacity-50 ${
+                  imageFile && !cameraOpen
+                    ? 'border-amber bg-amber/15 text-amber'
+                    : 'border-line bg-surface-2 text-muted hover:border-amber hover:text-amber'
+                }`}
+              >
+                <ImageIcon size={20} />
+              </button>
+              <button
+                type="button"
+                onClick={() => (cameraOpen ? stopCamera() : openCamera())}
+                disabled={asking || listening}
+                title={cameraOpen ? 'Close camera' : 'Take a photo with camera'}
+                className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all disabled:opacity-50 ${
+                  cameraOpen
+                    ? 'border-amber bg-amber text-white'
+                    : 'border-line bg-surface-2 text-muted hover:border-amber hover:text-amber'
+                }`}
+              >
+                <Camera size={20} />
+              </button>
               <button
                 type="button"
                 onClick={toggleMic}
@@ -421,7 +623,7 @@ export default function Ask() {
                 />
                 <button
                   type="submit"
-                  disabled={!question.trim() || asking || listening}
+                  disabled={(!question.trim() && !imageFile) || asking || listening}
                   className="w-12 h-12 rounded-full bg-amber text-white flex items-center justify-center disabled:opacity-40 shrink-0 shadow-md shadow-amber/20"
                 >
                   <Send size={18} />
@@ -440,12 +642,47 @@ export default function Ask() {
                 Auto-play answers
               </label>
               <span>
-                {listening ? 'Tap mic again when done' : 'Tap mic to ask by voice'}
+                {listening ? 'Tap mic again when done' : 'Tap mic to ask by voice · gallery or camera for a photo of the issue'}
               </span>
             </div>
           </div>
         </>
       )}
+
+      {/* Full-size image viewer */}
+      <AnimatePresence>
+        {lightboxSrc && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setLightboxSrc(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image preview"
+          >
+            <button
+              type="button"
+              onClick={() => setLightboxSrc(null)}
+              className="absolute top-4 right-4 w-11 h-11 rounded-full bg-white/15 text-white flex items-center justify-center hover:bg-white/25"
+              aria-label="Close"
+            >
+              <X size={22} />
+            </button>
+            <motion.img
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              src={lightboxSrc}
+              alt="Full size"
+              className="max-w-full max-h-[88vh] rounded-2xl object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

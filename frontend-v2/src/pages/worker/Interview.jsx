@@ -750,72 +750,93 @@ export default function Interview() {
 
   /* ========== LOBBY ========== */
   return (
-    <div className="max-w-2xl mx-auto w-full">
-      <div className="mb-6">
+    <div className="max-w-3xl mx-auto w-full">
+      <div className="mb-8">
         <p className="text-xs font-semibold uppercase tracking-wider text-amber mb-1">Tacit knowledge</p>
         <h1 className="text-2xl sm:text-3xl font-semibold text-text">Work interview</h1>
-        <p className="text-sm text-muted mt-1.5">
+        <p className="text-[15px] sm:text-base text-muted mt-2 leading-relaxed max-w-2xl">
           Video-style panel · AI asks out loud · you answer by voice with live captions.
+          Knowledge is distilled into tips for supervisor review — nothing goes live until approved.
         </p>
       </div>
 
       {machines.length === 0 ? (
-        <Card className="p-10 border-2 border-line text-center text-muted">
+        <Card className="p-10 border-2 border-line text-center text-muted text-[15px]">
           No machine assigned yet. Ask a supervisor to assign one.
         </Card>
       ) : (
-        <Card className="p-8 md:p-10 border-2 border-line">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-amber/15 border-2 border-amber/30 flex items-center justify-center text-amber shrink-0">
-              <Mic2 size={28} />
+        <div className="space-y-6">
+          <Card className="p-8 md:p-10 border-2 border-line">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-8">
+              <div className="w-16 h-16 rounded-2xl bg-amber/15 border-2 border-amber/30 flex items-center justify-center text-amber shrink-0">
+                <Mic2 size={28} />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold text-text mb-1">Interview room</h2>
+                <p className="text-[15px] text-muted leading-relaxed">
+                  Left: AI interviewer · Right: your camera (preview only, not recorded).
+                </p>
+              </div>
             </div>
-            <div className="flex-1">
-              <h2 className="text-xl font-semibold text-text mb-1">Interview room</h2>
-              <p className="text-sm text-muted">
-                Left: AI interviewer · Right: your camera (preview only, not recorded).
-              </p>
-            </div>
-          </div>
 
-          <div className="mb-6">
-            <Select label="Machine" value={machineId} onChange={(e) => setMachineId(e.target.value)}>
-              {machines.map((m) => (
-                <option key={m} value={m}>{m}</option>
+            <div className="mb-6">
+              <Select label="Machine" value={machineId} onChange={(e) => setMachineId(e.target.value)}>
+                {machines.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </Select>
+            </div>
+
+            <div className="grid sm:grid-cols-3 gap-4 mb-8">
+              {[
+                { n: '1', t: 'Listen', d: 'AI speaks the question out loud so you can work hands-free.' },
+                { n: '2', t: 'Answer', d: 'Talk into the mic — live captions appear as you speak.' },
+                { n: '3', t: 'Continue', d: 'Move to the next topic or a short follow-up when needed.' },
+              ].map((s) => (
+                <div key={s.n} className="rounded-2xl border-2 border-line bg-surface-2 p-5 text-left">
+                  <span className="inline-flex w-8 h-8 items-center justify-center rounded-full bg-amber text-white text-sm font-bold mb-3">{s.n}</span>
+                  <p className="text-base font-semibold text-text">{s.t}</p>
+                  <p className="text-[15px] text-muted mt-1.5 leading-relaxed">{s.d}</p>
+                </div>
               ))}
-            </Select>
-          </div>
-
-          <div className="grid sm:grid-cols-3 gap-3 mb-8">
-            {[
-              { n: '1', t: 'Listen', d: 'AI speaks the question' },
-              { n: '2', t: 'Answer', d: 'Mic + live captions' },
-              { n: '3', t: 'Continue', d: 'Next topic or follow-up' },
-            ].map((s) => (
-              <div key={s.n} className="rounded-xl border-2 border-line bg-surface-2 p-3 text-center">
-                <span className="inline-flex w-7 h-7 items-center justify-center rounded-full bg-amber text-white text-xs font-bold mb-2">{s.n}</span>
-                <p className="text-sm font-semibold text-text">{s.t}</p>
-                <p className="text-xs text-muted mt-0.5">{s.d}</p>
-              </div>
-            ))}
-          </div>
-
-          {resumable?.resumable ? (
-            <div className="rounded-2xl border-2 border-amber/30 bg-amber/5 p-5">
-              <h3 className="text-base font-semibold mb-1">Continue where you left off?</h3>
-              <p className="text-sm text-muted mb-4">
-                Topic {(resumable.topic_index || 0) + 1} of {resumable.total_topics}
-              </p>
-              <div className="flex flex-wrap gap-3">
-                <Button variant="amber" size="lg" onClick={() => runSetupThenStart(false)} icon={Play}>Continue</Button>
-                <Button variant="ghost" size="lg" onClick={() => runSetupThenStart(true)}>Start fresh</Button>
-              </div>
             </div>
-          ) : (
-            <Button variant="amber" size="lg" className="min-w-[220px]" onClick={() => runSetupThenStart(false)} icon={Sparkles}>
-              Start interview
-            </Button>
-          )}
-        </Card>
+
+            {resumable?.resumable ? (
+              <div className="rounded-2xl border-2 border-amber/30 bg-amber/5 p-5">
+                <h3 className="text-base font-semibold mb-1">Continue where you left off?</h3>
+                <p className="text-[15px] text-muted mb-4 leading-relaxed">
+                  Topic {(resumable.topic_index || 0) + 1} of {resumable.total_topics}
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <Button variant="amber" size="lg" onClick={() => runSetupThenStart(false)} icon={Play}>Continue</Button>
+                  <Button variant="ghost" size="lg" onClick={() => runSetupThenStart(true)}>Start fresh</Button>
+                </div>
+              </div>
+            ) : (
+              <Button variant="amber" size="lg" className="min-w-[220px]" onClick={() => runSetupThenStart(false)} icon={Sparkles}>
+                Start interview
+              </Button>
+            )}
+          </Card>
+
+          {/* Tutorial / guidance to fill empty space */}
+          <Card className="p-6 md:p-8 border-2 border-line">
+            <h3 className="font-display text-xl font-bold mb-4">Before you start</h3>
+            <div className="grid sm:grid-cols-2 gap-4">
+              {[
+                { t: 'Quiet space helps', d: 'Background noise can hurt captions. Pause if someone interrupts — you can resume later.' },
+                { t: 'Camera is preview only', d: 'Your face is never recorded. Only voice answers are saved for admin review when useful.' },
+                { t: 'Answer in your words', d: 'Short practical answers beat long theory. Talk like you would train a new joinee.' },
+                { t: 'Supervisor reviews first', d: 'Insights become pending tips. Nothing is searchable in Ask AI until approved.' },
+              ].map((x) => (
+                <div key={x.t} className="rounded-xl border border-line bg-surface-2 p-4">
+                  <p className="text-base font-semibold text-text mb-1">{x.t}</p>
+                  <p className="text-[15px] text-muted leading-relaxed">{x.d}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   );

@@ -122,7 +122,10 @@ class CreateTicketRequest(BaseModel):
     priority: str = "Medium"  # Low / Medium / High
 
 class UpdateTicketRequest(BaseModel):
-    status: str  # Open / In Progress / Resolved / Closed
+    status: Optional[str] = None  # Open / In Progress / Resolved / Closed
+    priority: Optional[str] = None  # Low / Medium / High
+    admin_note: Optional[str] = None  # supervisor note shown to the worker
+
 
 
 # ---------- Safety Measures ----------

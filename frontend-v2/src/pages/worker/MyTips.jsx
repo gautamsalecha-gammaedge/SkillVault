@@ -35,6 +35,7 @@ export default function MyTips() {
   const [loading, setLoading] = useState(true);
   const [tips, setTips] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [machineFilter, setMachineFilter] = useState('all');
 
   const [machines, setMachines] = useState([]);
   const [machineId, setMachineId] = useState('');
@@ -52,6 +53,7 @@ export default function MyTips() {
   const [mediaFile, setMediaFile] = useState(null);
   const [mediaPreview, setMediaPreview] = useState(null);
   const [mediaKind, setMediaKind] = useState(null);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
 
   const [listening, setListening] = useState(false);
   const [liveCaption, setLiveCaption] = useState('');
@@ -102,10 +104,17 @@ export default function MyTips() {
   }, [tips]);
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return tips;
-    if (filter === 'approved') return tips.filter((t) => t.status === 'approved');
-    return tips.filter((t) => t.status !== 'approved');
-  }, [tips, filter]);
+    let list = tips;
+    if (filter === 'approved') list = list.filter((t) => t.status === 'approved');
+    else if (filter === 'pending') list = list.filter((t) => t.status !== 'approved');
+    if (machineFilter !== 'all') list = list.filter((t) => t.machine_id === machineFilter);
+    return list;
+  }, [tips, filter, machineFilter]);
+
+  const machineOptions = useMemo(() => {
+    const ids = [...new Set(tips.map((t) => t.machine_id).filter(Boolean))];
+    return ids.sort();
+  }, [tips]);
 
   const clearMedia = () => {
     if (mediaPreview) URL.revokeObjectURL(mediaPreview);
@@ -416,15 +425,13 @@ export default function MyTips() {
     setRound(1);
   };
 
-  const showSidePanel = tab === 'capture' && stage !== 'done';
-
   return (
-    <div className="w-full max-w-6xl mx-auto">
+    <div className="w-full max-w-4xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-amber mb-1">Tips</p>
           <h1 className="text-2xl sm:text-3xl font-semibold text-text tracking-tight">Share what you know</h1>
-          <p className="text-sm text-muted mt-1.5">Speak or type · AI checks before you can submit</p>
+          <p className="text-[15px] sm:text-base text-muted mt-1.5 leading-relaxed">Speak or type · AI checks before you can submit</p>
         </div>
         <div className="flex p-1 rounded-xl bg-surface-2 border-2 border-line self-start">
           <button
@@ -452,9 +459,8 @@ export default function MyTips() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className={showSidePanel ? 'grid lg:grid-cols-[1fr_300px] gap-6 items-start' : ''}
           >
-            <div className="min-w-0">
+            <div className="min-w-0 space-y-6">
               {stage !== 'done' && (
                 <div className="flex flex-wrap gap-2 mb-4">
                   {[
@@ -585,7 +591,11 @@ export default function MyTips() {
                         <div className="rounded-xl overflow-hidden border-2 border-line bg-surface-3 max-h-48">
                           {mediaKind === 'video'
                             ? <video src={mediaPreview} controls className="w-full max-h-48 object-contain" />
-                            : <img src={mediaPreview} alt="" className="w-full max-h-48 object-contain" />}
+                            : (
+                              <button type="button" onClick={() => setLightboxSrc(mediaPreview)} className="block w-full" title="View full image">
+                                <img src={mediaPreview} alt="Tip photo" className="w-full max-h-48 object-contain cursor-zoom-in hover:opacity-95" />
+                              </button>
+                            )}
                         </div>
                       )}
                       {submitting && progress > 0 && <ProgressBar value={progress * 100} tone="amber" />}
@@ -602,7 +612,7 @@ export default function MyTips() {
                     <motion.div key="draft" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
                       <div>
                         <h2 className="text-xl font-semibold text-text">Write your tip</h2>
-                        <p className="text-sm text-muted mt-1">Speak or type · AI checks before you can submit</p>
+                        <p className="text-[15px] text-muted mt-1.5 leading-relaxed">Speak or type · AI checks before you can submit</p>
                       </div>
                       <Select label="Machine" value={machineId} onChange={(e) => setMachineId(e.target.value)}>
                         {machines.length === 0 && <option value="">No machines assigned</option>}
@@ -614,11 +624,11 @@ export default function MyTips() {
                           <MicBtn listening={listening} transcribing={transcribing} onClick={() => toggleMic('main')} />
                           <div className="flex-1 min-w-0">
                             <Textarea
-                              rows={6}
+                              rows={10}
                               value={text}
                               onChange={(e) => setText(e.target.value)}
                               placeholder="e.g. When the coolant pump hums louder than usual, check the inlet filter first."
-                              className="text-base"
+                              className="text-base min-h-[220px]"
                             />
                             {(listening || liveCaption || transcribing) && (
                               <LiveLine listening={listening} liveCaption={liveCaption} transcribing={transcribing} />
@@ -632,7 +642,11 @@ export default function MyTips() {
                           <div className="relative rounded-xl overflow-hidden border-2 border-line bg-surface-3">
                             {mediaKind === 'video'
                               ? <video src={mediaPreview} controls className="w-full max-h-56 object-contain" />
-                              : <img src={mediaPreview} alt="" className="w-full max-h-56 object-contain" />}
+                              : (
+                                <button type="button" onClick={() => setLightboxSrc(mediaPreview)} className="block w-full" title="View full image">
+                                  <img src={mediaPreview} alt="Tip photo" className="w-full max-h-56 object-contain cursor-zoom-in hover:opacity-95" />
+                                </button>
+                              )}
                             <button type="button" onClick={clearMedia} className="absolute top-2 right-2 w-9 h-9 rounded-full bg-black/75 text-white flex items-center justify-center">
                               <X size={16} />
                             </button>
@@ -703,79 +717,96 @@ export default function MyTips() {
               </Card>
             </div>
 
-            {showSidePanel && (
-              <aside className="hidden lg:block">
-                <div className="sv-card border-2 border-line p-5 sticky top-6">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-amber mb-4 flex items-center gap-2">
-                    <Sparkles size={14} /> How it works
-                  </p>
-                  <div className="space-y-0">
-                    {HOW_STEPS.map((s, i) => {
-                      const active =
-                        (s.n === 1 && stage === 'draft') ||
-                        (s.n === 2 && (stage === 'checking' || stage === 'followup' || stage === 'combining')) ||
-                        (s.n === 3 && stage === 'final');
-                      const done =
-                        (s.n === 1 && stage !== 'draft') ||
-                        (s.n === 2 && stage === 'final');
-                      return (
-                        <div key={s.n} className="relative flex gap-3 pb-5 last:pb-0">
-                          {i < HOW_STEPS.length - 1 && (
-                            <div className={'absolute left-[15px] top-9 bottom-0 w-0.5 ' + (done ? 'bg-signal/40' : 'bg-line')} />
+            {tab === 'capture' && stage !== 'done' && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.08 }}
+                className="sv-card border-2 border-line p-6 md:p-8"
+              >
+                <p className="text-sm font-semibold uppercase tracking-wider text-amber mb-5 flex items-center gap-2">
+                  <Sparkles size={16} /> How it works
+                </p>
+                <div className="grid sm:grid-cols-3 gap-5">
+                  {HOW_STEPS.map((s) => {
+                    const active =
+                      (s.n === 1 && stage === 'draft') ||
+                      (s.n === 2 && (stage === 'checking' || stage === 'followup' || stage === 'combining')) ||
+                      (s.n === 3 && stage === 'final');
+                    const done =
+                      (s.n === 1 && stage !== 'draft') ||
+                      (s.n === 2 && stage === 'final');
+                    return (
+                      <div
+                        key={s.n}
+                        className={'rounded-2xl border-2 p-5 transition-colors ' + (
+                          active ? 'border-amber bg-amber/5' :
+                          done ? 'border-signal/30 bg-signal/5' :
+                          'border-line bg-surface-2'
+                        )}
+                      >
+                        <div
+                          className={'w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold mb-3 border-2 ' + (
+                            active ? 'bg-amber text-white border-amber' :
+                            done ? 'bg-signal text-white border-signal' :
+                            'bg-surface text-muted border-line'
                           )}
-                          <div
-                            className={'relative z-10 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 border-2 ' + (
-                              active ? 'bg-amber text-white border-amber' :
-                              done ? 'bg-signal text-white border-signal' :
-                              'bg-surface-2 text-muted border-line'
-                            )}
-                          >
-                            {done && !active ? <CheckCircle2 size={14} /> : s.n}
-                          </div>
-                          <div className="pt-0.5 min-w-0">
-                            <p className={'text-sm font-semibold ' + (active ? 'text-amber' : done ? 'text-signal' : 'text-text')}>
-                              {s.title}
-                            </p>
-                            <p className="text-xs text-muted leading-relaxed mt-0.5">{s.body}</p>
-                          </div>
+                        >
+                          {done && !active ? <CheckCircle2 size={16} /> : s.n}
                         </div>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-4 pt-4 border-t-2 border-line">
-                    <div className="flex items-start gap-2.5 rounded-xl bg-surface-2 border border-line p-3">
-                      <FileCheck size={16} className="text-signal shrink-0 mt-0.5" />
-                      <p className="text-xs text-muted leading-relaxed">
-                        Use <strong className="text-text">Speak</strong> on AI questions so you can listen on the floor without reading.
-                      </p>
-                    </div>
-                  </div>
+                        <p className={'text-base font-semibold mb-1.5 ' + (active ? 'text-amber' : done ? 'text-signal' : 'text-text')}>
+                          {s.title}
+                        </p>
+                        <p className="text-[15px] text-muted leading-relaxed">{s.body}</p>
+                      </div>
+                    );
+                  })}
                 </div>
-              </aside>
+                <div className="mt-5 flex items-start gap-3 rounded-xl bg-surface-2 border border-line p-4">
+                  <FileCheck size={18} className="text-signal shrink-0 mt-0.5" />
+                  <p className="text-[15px] text-muted leading-relaxed">
+                    Use <strong className="text-text">Speak</strong> on AI questions so you can listen on the floor without reading.
+                  </p>
+                </div>
+              </motion.div>
             )}
           </motion.div>
         ) : (
           <motion.div key="library" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-            <div className="flex flex-wrap gap-2 mb-5">
-              {[
-                { key: 'all', label: 'Shared', n: counts.all },
-                { key: 'approved', label: 'Live', n: counts.approved },
-                { key: 'pending', label: 'In review', n: counts.pending },
-              ].map((s) => (
-                <button
-                  key={s.key}
-                  type="button"
-                  onClick={() => setFilter(s.key)}
-                  className={'inline-flex items-center gap-2 px-4 py-2 rounded-full border-2 text-sm font-semibold ' + (
-                    filter === s.key ? 'bg-amber text-white border-amber' : 'bg-surface border-line text-text hover:border-amber/50'
-                  )}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: 'all', label: 'Shared', n: counts.all },
+                  { key: 'approved', label: 'Live', n: counts.approved },
+                  { key: 'pending', label: 'In review', n: counts.pending },
+                ].map((s) => (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => setFilter(s.key)}
+                    className={'inline-flex items-center gap-2 px-4 py-2 rounded-full border-2 text-sm font-semibold ' + (
+                      filter === s.key ? 'bg-amber text-white border-amber' : 'bg-surface border-line text-text hover:border-amber/50'
+                    )}
+                  >
+                    {s.label}
+                    <span style={numStyle} className={'min-w-[1.4rem] h-6 px-1.5 rounded-full text-xs font-bold flex items-center justify-center ' + (filter === s.key ? 'bg-white/25' : 'bg-surface-3')}>
+                      {s.n}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {machineOptions.length > 0 && (
+                <select
+                  value={machineFilter}
+                  onChange={(e) => setMachineFilter(e.target.value)}
+                  className="bg-surface-2 border-2 border-line rounded-xl px-4 py-2.5 text-sm font-semibold text-text outline-none focus:border-amber"
                 >
-                  {s.label}
-                  <span style={numStyle} className={'min-w-[1.4rem] h-6 px-1.5 rounded-full text-xs font-bold flex items-center justify-center ' + (filter === s.key ? 'bg-white/25' : 'bg-surface-3')}>
-                    {s.n}
-                  </span>
-                </button>
-              ))}
+                  <option value="all">All machines</option>
+                  {machineOptions.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              )}
             </div>
             <Card className="p-7 md:p-9 border-2 border-line min-h-[480px]">
               {loading ? (
@@ -797,13 +828,20 @@ export default function MyTips() {
                       transition={{ delay: Math.min(i * 0.04, 0.25) }}
                       className="rounded-xl border-2 border-line bg-surface-2 p-5"
                     >
-                      <div className="flex items-center justify-between gap-3 mb-2">
-                        <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-surface border border-line">{t.machine_id}</span>
+                      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-surface border border-line">{t.machine_id}</span>
+                          {(t.created_at || t.submitted_at || t.timestamp) && (
+                            <span className="text-xs font-mono text-muted">
+                              {new Date(t.created_at || t.submitted_at || t.timestamp).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
                         {t.status === 'approved'
                           ? <Badge tone="signal"><CheckCircle2 size={11} /> Live</Badge>
                           : <Badge tone="amber"><Clock size={11} /> In review</Badge>}
                       </div>
-                      <p className="text-sm text-text leading-relaxed">{t.text}</p>
+                      <p className="text-[15px] text-text leading-relaxed">{t.text}</p>
                     </motion.div>
                   ))}
                 </div>
@@ -844,6 +882,41 @@ function LiveLine({ listening, liveCaption, transcribing }) {
           {liveCaption || <span className="text-muted">Listening…</span>}
         </span>
       ) : null}
+
+      {/* Full-size image viewer */}
+      <AnimatePresence>
+        {lightboxSrc && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setLightboxSrc(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image preview"
+          >
+            <button
+              type="button"
+              onClick={() => setLightboxSrc(null)}
+              className="absolute top-4 right-4 w-11 h-11 rounded-full bg-white/15 text-white flex items-center justify-center hover:bg-white/25 z-10"
+              aria-label="Close"
+            >
+              <X size={22} />
+            </button>
+            <motion.img
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              src={lightboxSrc}
+              alt="Full size"
+              className="max-w-full max-h-[88vh] rounded-2xl object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

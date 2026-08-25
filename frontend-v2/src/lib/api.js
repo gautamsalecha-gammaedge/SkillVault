@@ -113,7 +113,6 @@ function addKnowledgeXhr(text, machine_id, language_code, videoFile, onProgress,
   form.append('machine_id', machine_id);
   form.append('language_code', language_code);
   if (videoFile) form.append('video', videoFile);
-  // Image field for future backend support — ignored by current API until implemented
   if (imageFile) form.append('image', imageFile);
   return xhr('/Knowledge/add-knowledge', form, { authKind: 'worker', onProgress });
 }
@@ -124,6 +123,15 @@ function submitInterviewAnswerXhr(session_id, answer_text, language_code, audioB
   form.append('language_code', language_code);
   if (audioBlob) form.append('audio', audioBlob, 'answer.webm');
   return xhr(`/interview/${encodeURIComponent(session_id)}/answer`, form, { authKind: 'worker', onProgress });
+}
+
+
+function askWithMediaXhr(question, machine_id, imageFile, onProgress) {
+  const form = new FormData();
+  form.append('question', question || '');
+  form.append('machine_id', machine_id);
+  if (imageFile) form.append('image', imageFile);
+  return xhr('/ask/with-media', form, { authKind: 'worker', onProgress });
 }
 
 function safetyVideoXhr(measureId, videoFile, onProgress) {
@@ -174,7 +182,10 @@ export const api = {
   analytics: () => apiFetch('/admin/analytics', { auth: 'admin' }),
 
   /* ---------------- Ask / Knowledge / Voice ---------------- */
-  ask: (question, machine_id) => apiFetch('/ask', { method: 'POST', auth: 'worker', body: { question, machine_id } }),
+  ask: (question, machine_id, imageFile = null, onProgress = null) => {
+    if (imageFile) return askWithMediaXhr(question, machine_id, imageFile, onProgress);
+    return apiFetch('/ask', { method: 'POST', auth: 'worker', body: { question, machine_id } });
+  },
   checkKnowledge: (text, machine_id, round, language_code) =>
     apiFetch('/Knowledge/add-knowledge/check', { method: 'POST', auth: 'worker', body: { text, machine_id, round, language_code } }),
   addKnowledge: (text, machine_id, language_code, videoFile = null, onProgress = null, imageFile = null) =>
@@ -203,6 +214,7 @@ export const api = {
   adminInterviewTranscript: (session_id) => apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}`, { auth: 'admin' }),
   approveSessionPending: (session_id) => apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}/approve-pending`, { method: 'POST', auth: 'admin' }),
   rejectSessionPending: (session_id) => apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}/reject-pending`, { method: 'POST', auth: 'admin' }),
+  deleteInterviewSession: (session_id) => apiFetch(`/admin/interview-sessions/${encodeURIComponent(session_id)}`, { method: 'DELETE', auth: 'admin' }),
 
   /* ---------------- Machine Safety Measures ---------------- */
   mySafetyStatus: () => apiFetch('/safety/my-status', { auth: 'worker' }),
@@ -225,6 +237,19 @@ export const api = {
   /* ---------------- Tickets ---------------- */
   createTicket: (data) => apiFetch('/tickets', { method: 'POST', auth: 'worker', body: data }),
   myTickets: () => apiFetch('/tickets/my', { auth: 'worker' }),
-  adminTickets: (status = null) => apiFetch(status ? `/tickets/admin?status=${encodeURIComponent(status)}` : '/tickets/admin', { auth: 'admin' }),
+  adminTickets: (params = null) => {
+    // Accept string (legacy status filter) or object { status, priority, machine_id }
+    const q = new URLSearchParams();
+    if (typeof params === 'string' && params) {
+      q.set('status', params);
+    } else if (params && typeof params === 'object') {
+      if (params.status) q.set('status', params.status);
+      if (params.priority) q.set('priority', params.priority);
+      if (params.machine_id) q.set('machine_id', params.machine_id);
+    }
+    const qs = q.toString();
+    return apiFetch(qs ? `/tickets/admin?${qs}` : '/tickets/admin', { auth: 'admin' });
+  },
   updateTicketStatus: (ticketId, status) => apiFetch(`/tickets/${encodeURIComponent(ticketId)}`, { method: 'PATCH', auth: 'admin', body: { status } }),
+  updateTicket: (ticketId, data) => apiFetch(`/tickets/${encodeURIComponent(ticketId)}`, { method: 'PATCH', auth: 'admin', body: data }),
 };

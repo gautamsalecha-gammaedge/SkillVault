@@ -34,9 +34,9 @@ export default function Safety() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-signal mb-1">Safety first</p>
           <h1 className="text-2xl sm:text-3xl font-semibold text-text">Machine safety briefings</h1>
-          <p className="text-sm text-muted mt-1.5 max-w-xl">
+          <p className="text-[15px] sm:text-base text-muted mt-2 max-w-2xl leading-relaxed">
             Complete the briefing for each machine <strong className="text-text">before you start work</strong>.
-            This is required — not optional.
+            This is required — not optional. Steps cover hazards, PPE, and floor rules for your assignment.
           </p>
         </div>
         {machines.length > 0 && (
@@ -69,7 +69,7 @@ export default function Safety() {
                 <h2 className="text-base font-semibold text-text mb-1">
                   {pending.length} briefing{pending.length !== 1 ? 's' : ''} still required
                 </h2>
-                <p className="text-sm text-muted leading-relaxed">
+                <p className="text-[15px] text-muted leading-relaxed">
                   Do not operate these machines until you finish the safety tutorial.
                   Steps cover hazards, PPE, and floor rules for your assignment.
                 </p>
@@ -82,7 +82,7 @@ export default function Safety() {
               </div>
               <div>
                 <h2 className="text-base font-semibold text-text mb-1">You’re cleared for assigned machines</h2>
-                <p className="text-sm text-muted leading-relaxed">
+                <p className="text-[15px] text-muted leading-relaxed">
                   All required briefings are complete. Re-open any briefing anytime to review.
                 </p>
               </div>
@@ -98,8 +98,8 @@ export default function Safety() {
           ].map(({ icon: Icon, t, d, tone }) => (
             <div key={t} className={`rounded-xl border-2 p-4 ${tone}`}>
               <Icon size={18} className="mb-2 opacity-90" />
-              <p className="text-sm font-semibold text-text">{t}</p>
-              <p className="text-xs text-muted mt-1 leading-relaxed">{d}</p>
+              <p className="text-[15px] font-semibold text-text">{t}</p>
+              <p className="text-sm text-muted mt-1.5 leading-relaxed">{d}</p>
             </div>
           ))}
         </div>
@@ -175,16 +175,16 @@ function MachineCard({ m, index, required }) {
         >
           {m.completed ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />}
         </div>
-        <p className="text-sm text-muted mb-1">
+        <p className="text-[15px] text-muted mb-1">
           {m.measure_count || 0} step{(m.measure_count || 0) !== 1 ? 's' : ''} in this briefing
         </p>
         {m.completed_at && (
-          <p className="text-xs text-muted">
+          <p className="text-sm text-muted">
             Last completed {new Date(m.completed_at).toLocaleDateString()}
           </p>
         )}
         <span
-          className={`mt-4 inline-flex items-center gap-1.5 text-sm font-semibold ${
+          className={`mt-4 inline-flex items-center gap-1.5 text-[15px] font-semibold ${
             required ? 'text-amber' : 'text-signal'
           }`}
         >

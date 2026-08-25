@@ -517,6 +517,38 @@ def reject_session_pending(
     return {"rejected": len(ids)}
 
 
+
+@admin_router.delete("/interview-sessions/{session_id}")
+def delete_interview_session(
+    session_id: str,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently deletes an interview session, its turns, and any Chroma
+    knowledge entries tagged with this session_id. Used by Knowledge Review
+    to clean up empty or unwanted sessions (e.g. 0-insight completed runs).
+    """
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+
+    # Remove knowledge entries produced by this session (pending or approved)
+    try:
+        results = collection.get(where={"session_id": session_id})
+        ids = results.get("ids") or []
+        if ids:
+            collection.delete(ids=ids)
+    except Exception as e:
+        print(f"Chroma cleanup for session {session_id} failed: {e}")
+
+    db.query(InterviewTurn).filter(InterviewTurn.session_id == session_id).delete()
+    db.delete(session)
+    db.commit()
+
+    return {"status": "deleted", "session_id": session_id}
+
+
 @admin_router.get("/interview-sessions/{session_id}")
 def get_interview_transcript(
     session_id: str,

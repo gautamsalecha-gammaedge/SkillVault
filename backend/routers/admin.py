@@ -127,8 +127,8 @@ def get_all_workers(authorized: bool = Depends(require_admin), db: Session = Dep
 @router.get("/pending")
 def get_pending(machine_id: str, authorized: bool = Depends(require_admin)):
     """Returns all worker-added knowledge entries still waiting for admin approval, for one machine.
-    Includes video_url/transcript/video_description when the tip has an attached video (see
-    rag/video_storage.py, rag/video_understanding.py, routers/knowledge.py)."""
+    Includes video fields and image fields (image_url / image_description / image_visible_text)
+    when the tip has attached media."""
     results = collection.get(
         where={
             "$and": [
@@ -148,6 +148,9 @@ def get_pending(machine_id: str, authorized: bool = Depends(require_admin)):
             "video_url": meta.get("video_url") or None,
             "transcript": meta.get("transcript") or "",
             "video_description": meta.get("video_description") or "",
+            "image_url": meta.get("image_url") or None,
+            "image_description": meta.get("image_description") or "",
+            "image_visible_text": meta.get("image_visible_text") or "",
         })
     return {"pending_entries": entries}
 
@@ -156,11 +159,19 @@ def get_pending(machine_id: str, authorized: bool = Depends(require_admin)):
 
 @router.get("/pending-workers")
 def get_pending_workers(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    """Returns every worker account still waiting for admin approval."""
+    """Returns every worker account still waiting for admin approval,
+    including profile fields collected at registration."""
     pending = db.query(Worker).filter(Worker.is_approved == False).all()  # noqa: E712
     return {
         "pending_workers": [
-            {"worker_id": w.worker_id, "name": w.name} for w in pending
+            {
+                "worker_id": w.worker_id,
+                "name": w.name,
+                "phone_country_code": w.phone_country_code or "+91",
+                "phone_number": w.phone_number or "",
+                "address": w.address or "",
+            }
+            for w in pending
         ]
     }
 

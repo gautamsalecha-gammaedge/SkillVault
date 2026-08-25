@@ -40,7 +40,7 @@ const numStyle = {
 
 export default function MyTickets() {
   const toast = useToast();
-  const [tab, setTab] = useState('history');
+  const [tab, setTab] = useState('new');
   const [loading, setLoading] = useState(true);
   const [tickets, setTickets] = useState([]);
   const [filter, setFilter] = useState('all');
@@ -320,6 +320,12 @@ export default function MyTickets() {
                                 <p className="text-xs text-muted mt-4">
                                   Supervisors update status as they work the issue. You’ll see changes here as soon as they’re saved.
                                 </p>
+                                {t.admin_note && (
+                                  <div className="mt-4 rounded-xl border-2 border-signal/25 bg-signal/5 p-3.5">
+                                    <p className="text-[10px] font-mono uppercase tracking-wider text-signal mb-1.5">Supervisor note</p>
+                                    <p className="text-sm text-text leading-relaxed whitespace-pre-wrap">{t.admin_note}</p>
+                                  </div>
+                                )}
                               </div>
                             </motion.div>
                           )}

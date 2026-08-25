@@ -51,6 +51,7 @@ app.add_middleware(
 # ---------- Video / Uploads support ----------
 os.makedirs("uploads/videos", exist_ok=True)
 os.makedirs("uploads/interview_audio", exist_ok=True)  # Tacit Knowledge Capture answer recordings
+os.makedirs("uploads/images", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # ---------- Routers ----------
@@ -65,6 +66,7 @@ app.include_router(interview.router)         # /interview/*        - worker inte
 app.include_router(interview.admin_router)   # /admin/interview-*  - admin session review
 app.include_router(safety.router)            # /safety/*           - worker safety briefing
 app.include_router(safety.admin_router)      # /admin/safety/*     - admin manage measures
+
 
 @app.get("/")
 def root():

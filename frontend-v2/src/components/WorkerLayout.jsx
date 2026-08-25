@@ -15,7 +15,7 @@ const NAV = [
   { to: '/worker/my-tips', label: 'Tips', icon: ListChecks },
   { to: '/worker/interview', label: 'Interview', icon: Mic2 },
   { to: '/worker/my-tickets', label: 'Tickets', icon: Ticket },
-  { to: '/worker/settings', label: 'Settings', icon: Settings },
+  { to: '/worker/settings', label: 'Profile', icon: Settings },
 ];
 
 const DEFAULT_WIDTH = 300;

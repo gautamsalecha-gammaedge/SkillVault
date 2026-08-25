@@ -87,6 +87,7 @@ class Ticket(Base):
     description = Column(Text, nullable=False)
     priority = Column(String, nullable=False, default="Medium")  # Low / Medium / High
     status = Column(String, nullable=False, default="Open")      # Open / In Progress / Resolved / Closed
+    admin_note = Column(Text, nullable=True)  # supervisor response visible to the worker
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

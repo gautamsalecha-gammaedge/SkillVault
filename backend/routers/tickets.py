@@ -1,20 +1,65 @@
 """
 routers/tickets.py
-Worker can raise tickets. Admin can view and update status.
+Worker can raise tickets. Admin can view, update status/priority, and leave notes.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-import uuid
-from datetime import datetime
+from __future__ import annotations
 
-from db import get_db
+from datetime import datetime
+from typing import Optional
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from db import get_db, engine
 from models import Ticket, Worker
 from schemas import CreateTicketRequest, UpdateTicketRequest
 from auth.worker_auth import require_worker
-from auth.admin_auth import require_admin   # adjust import if your admin auth is named differently
+from auth.admin_auth import require_admin
 
 router = APIRouter(prefix="/tickets", tags=["Tickets"])
+
+
+def _ensure_admin_note_column():
+    """Add admin_note to existing DBs without a full migration tool."""
+    statements = [
+        "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS admin_note TEXT",
+        "ALTER TABLE tickets ADD COLUMN admin_note TEXT",
+    ]
+    for sql in statements:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(sql))
+            return
+        except Exception:
+            continue
+
+
+_ensure_admin_note_column()
+
+
+def _ticket_dict(t: Ticket, worker_name: Optional[str] = None) -> dict:
+    admin_note = None
+    try:
+        admin_note = t.admin_note
+    except Exception:
+        admin_note = None
+    return {
+        "id": t.id,
+        "worker_id": t.worker_id,
+        "worker_name": worker_name,
+        "title": t.title,
+        "description": t.description,
+        "machine_id": t.machine_id,
+        "priority": t.priority,
+        "status": t.status,
+        "admin_note": admin_note,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+    }
+
 
 @router.post("")
 def create_ticket(
@@ -22,14 +67,14 @@ def create_ticket(
     worker: dict = Depends(require_worker),
     db: Session = Depends(get_db),
 ):
-    ticket_id = str(uuid.uuid4())
+    priority = req.priority if req.priority in {"Low", "Medium", "High"} else "Medium"
     ticket = Ticket(
-        id=ticket_id,
+        id=str(uuid.uuid4()),
         worker_id=worker["worker_id"],
         machine_id=req.machine_id,
-        title=req.title,
-        description=req.description,
-        priority=req.priority,
+        title=req.title.strip(),
+        description=req.description.strip(),
+        priority=priority,
         status="Open",
     )
     db.add(ticket)
@@ -40,6 +85,7 @@ def create_ticket(
         "status": ticket.status,
         "message": "Ticket created successfully",
     }
+
 
 @router.get("/my")
 def my_tickets(
@@ -52,61 +98,70 @@ def my_tickets(
         .order_by(Ticket.created_at.desc())
         .all()
     )
-    return [
-        {
-            "id": t.id,
-            "title": t.title,
-            "description": t.description,
-            "machine_id": t.machine_id,
-            "priority": t.priority,
-            "status": t.status,
-            "created_at": t.created_at,
-            "updated_at": t.updated_at,
-        }
-        for t in tickets
-    ]
+    return [_ticket_dict(t) for t in tickets]
+
 
 @router.get("/admin")
 def admin_list_tickets(
-    status: str | None = None,
-    admin: dict = Depends(require_admin),
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    machine_id: Optional[str] = None,
+    authorized: bool = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Ticket).order_by(Ticket.created_at.desc())
+    """List all tickets for admin review. Returns a JSON array."""
+    query = db.query(Ticket)
     if status:
         query = query.filter(Ticket.status == status)
-    tickets = query.all()
-    return [
-        {
-            "id": t.id,
-            "worker_id": t.worker_id,
-            "title": t.title,
-            "description": t.description,
-            "machine_id": t.machine_id,
-            "priority": t.priority,
-            "status": t.status,
-            "created_at": t.created_at,
-            "updated_at": t.updated_at,
-        }
-        for t in tickets
-    ]
+    if priority:
+        query = query.filter(Ticket.priority == priority)
+    if machine_id:
+        query = query.filter(Ticket.machine_id == machine_id)
+    tickets = query.order_by(Ticket.created_at.desc()).all()
+
+    worker_ids = {t.worker_id for t in tickets}
+    names = {}
+    if worker_ids:
+        for w in db.query(Worker).filter(Worker.worker_id.in_(list(worker_ids))).all():
+            names[w.worker_id] = w.name
+
+    return [_ticket_dict(t, names.get(t.worker_id)) for t in tickets]
+
 
 @router.patch("/{ticket_id}")
-def update_ticket_status(
+def update_ticket(
     ticket_id: str,
     req: UpdateTicketRequest,
-    admin: dict = Depends(require_admin),
+    authorized: bool = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
-    allowed = {"Open", "In Progress", "Resolved", "Closed"}
-    if req.status not in allowed:
-        raise HTTPException(status_code=400, detail=f"Status must be one of {allowed}")
+    if req.status is not None:
+        allowed = {"Open", "In Progress", "Resolved", "Closed"}
+        if req.status not in allowed:
+            raise HTTPException(status_code=400, detail=f"Status must be one of {allowed}")
+        ticket.status = req.status
 
-    ticket.status = req.status
+    if req.priority is not None:
+        if req.priority not in {"Low", "Medium", "High"}:
+            raise HTTPException(status_code=400, detail="Priority must be Low, Medium, or High")
+        ticket.priority = req.priority
+
+    if req.admin_note is not None:
+        try:
+            ticket.admin_note = req.admin_note.strip() or None
+        except Exception:
+            pass
+
     ticket.updated_at = datetime.utcnow()
     db.commit()
-    return {"id": ticket.id, "status": ticket.status, "message": "Status updated"}
+    db.refresh(ticket)
+
+    worker = db.query(Worker).filter(Worker.worker_id == ticket.worker_id).first()
+    return {
+        **_ticket_dict(ticket, worker.name if worker else None),
+        "message": "Ticket updated",
+    }
