@@ -26,6 +26,15 @@ function maxSidebarWidth() {
   return Math.max(MIN_WIDTH, Math.floor(window.innerWidth / 4));
 }
 
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.querySelectorAll('main').forEach((el) => { el.scrollTop = 0; });
+  }, [pathname]);
+  return null;
+}
+
 export default function WorkerLayout() {
   const name = getWorkerName();
   const id = getWorkerId();
@@ -71,6 +80,7 @@ export default function WorkerLayout() {
 
   return (
     <div className={`min-h-screen flex ${dragging ? 'select-none cursor-col-resize' : ''}`}>
+      <ScrollToTop />
       <aside
         className="hidden lg:flex shrink-0 flex-col sticky top-0 h-screen border-r-2 border-line relative"
         style={{
@@ -127,11 +137,9 @@ export default function WorkerLayout() {
           <div className="w-11" />
         </header>
         <main className="flex-1 p-4 sm:p-6 lg:p-8">
-          <AnimatePresence mode="wait">
-            <PageTransition key={location.pathname}>
-              <Outlet />
-            </PageTransition>
-          </AnimatePresence>
+          <PageTransition key={location.pathname}>
+            <Outlet />
+          </PageTransition>
         </main>
       </div>
     </div>

@@ -3,8 +3,10 @@ routers/admin.py
 
 POST   /admin/login                    - admin logs in, gets a token that expires after TOKEN_EXPIRY_HOURS
 GET    /admin/pending                  - admin views knowledge waiting for approval, for one machine
-POST   /admin/approve/{id}             - admin approves a pending knowledge entry
-DELETE /admin/delete/{id}              - admin deletes a knowledge entry (pending or approved)
+GET    /admin/knowledge                - list worker tips by status (pending|approved|rejected)
+POST   /admin/approve/{id}             - admin approves a pending/rejected knowledge entry
+POST   /admin/reject/{id}              - soft-reject a tip (kept for history, not used in Ask)
+DELETE /admin/delete/{id}              - permanently deletes a knowledge entry
 GET    /admin/pending-workers          - admin views worker registrations waiting for approval
 POST   /admin/approve-worker/{id}      - admin approves a worker's account, letting them log in
 DELETE /admin/reject-worker/{id}       - admin rejects/removes a worker's registration entirely
@@ -85,9 +87,29 @@ def update_admin_profile(
     return {"status": "updated", "username": ADMIN_USERNAME, "name": profile.name}
 
 
+def _entry_from_chroma(entry_id, document, meta):
+    """Normalize a Chroma worker tip for the admin knowledge UI."""
+    return {
+        "id": entry_id,
+        "text": document,
+        "status": meta.get("status") or "pending",
+        "worker_id": meta.get("worker_id"),
+        "worker_name": meta.get("worker_name"),
+        "machine_id": meta.get("machine_id"),
+        "source_type": meta.get("source_type") or "worker_input",
+        "video_url": meta.get("video_url") or None,
+        "transcript": meta.get("transcript") or "",
+        "video_description": meta.get("video_description") or "",
+        "image_url": meta.get("image_url") or None,
+        "image_description": meta.get("image_description") or "",
+        "image_visible_text": meta.get("image_visible_text") or "",
+    }
+
+
 @router.post("/approve/{entry_id}")
 def approve_entry(entry_id: str, authorized: bool = Depends(require_admin)):
-    """Marks a pending knowledge entry as approved, so it becomes searchable in /ask."""
+    """Marks a knowledge entry as approved so it becomes searchable in /ask.
+    Works for pending and previously rejected tips."""
     existing = collection.get(ids=[entry_id])
     if not existing["ids"]:
         raise HTTPException(status_code=404, detail="Entry not found.")
@@ -99,11 +121,83 @@ def approve_entry(entry_id: str, authorized: bool = Depends(require_admin)):
     return {"status": "approved", "id": entry_id}
 
 
+@router.post("/reject/{entry_id}")
+def reject_entry(entry_id: str, authorized: bool = Depends(require_admin)):
+    """Soft-rejects a tip: kept in history, hidden from Ask retrieval.
+    Prefer this over hard delete when you want an audit trail."""
+    existing = collection.get(ids=[entry_id])
+    if not existing["ids"]:
+        raise HTTPException(status_code=404, detail="Entry not found.")
+
+    metadata = existing["metadatas"][0]
+    if metadata.get("source_type") == "manual":
+        raise HTTPException(status_code=400, detail="Cannot reject a manual chunk this way.")
+
+    metadata["status"] = "rejected"
+    collection.update(ids=[entry_id], metadatas=[metadata])
+
+    return {"status": "rejected", "id": entry_id}
+
+
 @router.delete("/delete/{entry_id}")
 def delete_entry(entry_id: str, authorized: bool = Depends(require_admin)):
-    """Permanently deletes a knowledge entry (manual chunk or worker entry) by its ID."""
+    """Permanently deletes a knowledge entry (manual chunk or worker tip) by its ID."""
     collection.delete(ids=[entry_id])
     return {"status": "deleted", "id": entry_id}
+
+
+@router.get("/knowledge")
+def list_knowledge(
+    machine_id: str,
+    status: str = "pending",
+    authorized: bool = Depends(require_admin),
+):
+    """
+    Lists worker tips for one machine filtered by status:
+    pending | approved | rejected | all
+    Manual PDF chunks are excluded (source_type != worker_input when set).
+    """
+    status = (status or "pending").strip().lower()
+    allowed = {"pending", "approved", "rejected", "all"}
+    if status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of: {', '.join(sorted(allowed))}",
+        )
+
+    if status == "all":
+        results = collection.get(where={"machine_id": machine_id})
+    else:
+        results = collection.get(
+            where={
+                "$and": [
+                    {"machine_id": machine_id},
+                    {"status": status},
+                ]
+            }
+        )
+
+    entries = []
+    for i in range(len(results["ids"])):
+        meta = results["metadatas"][i] or {}
+        source = (meta.get("source_type") or "").strip()
+        # Worker tips always carry worker_id; skip manual PDF chunks
+        if source == "manual":
+            continue
+        if not meta.get("worker_id"):
+            continue
+        entries.append(
+            _entry_from_chroma(results["ids"][i], results["documents"][i], meta)
+        )
+
+    return {
+        "machine_id": machine_id,
+        "status": status,
+        "count": len(entries),
+        "entries": entries,
+        # backward-compatible alias used by older clients
+        "pending_entries": entries if status == "pending" else [],
+    }
 
 @router.get("/workers")
 def get_all_workers(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
@@ -140,19 +234,8 @@ def get_pending(machine_id: str, authorized: bool = Depends(require_admin)):
     entries = []
     for i in range(len(results["ids"])):
         meta = results["metadatas"][i]
-        entries.append({
-            "id": results["ids"][i],
-            "text": results["documents"][i],
-            "worker_id": meta.get("worker_id"),
-            "worker_name": meta.get("worker_name"),
-            "video_url": meta.get("video_url") or None,
-            "transcript": meta.get("transcript") or "",
-            "video_description": meta.get("video_description") or "",
-            "image_url": meta.get("image_url") or None,
-            "image_description": meta.get("image_description") or "",
-            "image_visible_text": meta.get("image_visible_text") or "",
-        })
-    return {"pending_entries": entries}
+        entries.append(_entry_from_chroma(results["ids"][i], results["documents"][i], meta))
+    return {"pending_entries": entries, "entries": entries, "count": len(entries)}
 
 
 # --- Worker account approval ---

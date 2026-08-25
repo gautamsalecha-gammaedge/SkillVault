@@ -36,31 +36,32 @@ function TopBar() {
   return (
     <header className="sticky top-0 z-50">
       <div
-        className="border-b border-stone-200/70 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset,0_10px_30px_-14px_rgba(28,25,23,0.14)]"
+        className="border-b border-stone-200/80 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset,0_12px_32px_-12px_rgba(28,25,23,0.16)]"
         style={{
           background:
-            'linear-gradient(180deg, rgba(255,252,248,0.98) 0%, rgba(250,247,242,0.94) 100%)',
+            'linear-gradient(180deg, rgba(255,252,248,0.99) 0%, rgba(250,247,242,0.96) 100%)',
           backdropFilter: 'blur(18px)',
           WebkitBackdropFilter: 'blur(18px)',
         }}
       >
-        <div className="max-w-7xl mx-auto px-5 sm:px-6 h-[4.5rem] md:h-[5rem] flex items-center justify-between gap-4">
-          <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
-            <div className="relative w-10 h-10 rounded-[11px] bg-gradient-to-br from-[#0f9d8a] to-[#0b7a6b] flex items-center justify-center shadow-[0_2px_10px_-2px_rgba(15,157,138,0.5)] group-hover:shadow-[0_4px_14px_-2px_rgba(15,157,138,0.55)] transition-shadow">
-              <span className="absolute inset-[3px] rounded-[8px] border border-white/30" />
-              <div className="w-2.5 h-2.5 rounded-full bg-white shadow-sm" />
+        {/* Taller bar — standard desktop ~72–80px for easy reading */}
+        <div className="max-w-7xl mx-auto px-5 sm:px-8 h-[4.75rem] sm:h-[5.25rem] md:h-[5.75rem] flex items-center justify-between gap-5">
+          <Link to="/" className="flex items-center gap-3 shrink-0 group">
+            <div className="relative w-12 h-12 sm:w-[3.25rem] sm:h-[3.25rem] rounded-[13px] bg-gradient-to-br from-[#0f9d8a] to-[#0b7a6b] flex items-center justify-center shadow-[0_3px_12px_-2px_rgba(15,157,138,0.5)] group-hover:shadow-[0_5px_16px_-2px_rgba(15,157,138,0.55)] transition-shadow">
+              <span className="absolute inset-[3px] rounded-[10px] border border-white/30" />
+              <div className="w-3 h-3 rounded-full bg-white shadow-sm" />
             </div>
             <div className="leading-none">
-              <span className="font-display font-bold text-[1.15rem] tracking-tight text-stone-900">
+              <span className="font-display font-bold text-[1.35rem] sm:text-[1.5rem] tracking-tight text-stone-900">
                 SkillVault
               </span>
-              <span className="hidden sm:block text-[10px] font-mono uppercase tracking-[0.14em] text-stone-400 mt-0.5">
+              <span className="hidden sm:block text-[12px] font-mono uppercase tracking-[0.16em] text-stone-500 mt-1">
                 Shop-floor knowledge
               </span>
             </div>
           </Link>
 
-          <nav className="hidden md:flex items-center gap-0.5 p-1 rounded-full border border-stone-200/90 bg-white/80 shadow-[0_1px_3px_rgba(28,25,23,0.05)]">
+          <nav className="hidden md:flex items-center gap-1 p-1.5 rounded-full border border-stone-200/90 bg-white/90 shadow-[0_1px_4px_rgba(28,25,23,0.06)]">
             {[
               { href: '#problem', label: 'The Problem' },
               { href: '#results', label: 'Results' },
@@ -70,23 +71,23 @@ function TopBar() {
               <a
                 key={item.href}
                 href={item.href}
-                className="px-4 py-2 rounded-full text-[13px] font-medium text-stone-500 hover:text-stone-900 hover:bg-stone-100 transition-colors"
+                className="px-5 py-2.5 rounded-full text-[15px] sm:text-base font-semibold text-stone-600 hover:text-stone-900 hover:bg-stone-100 transition-colors"
               >
                 {item.label}
               </a>
             ))}
           </nav>
 
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3.5 shrink-0">
             <Link
               to="/login"
-              className="hidden sm:inline-flex items-center h-11 px-4 rounded-full text-sm font-semibold text-stone-600 hover:text-stone-900 hover:bg-stone-100/90 transition-colors"
+              className="hidden sm:inline-flex items-center h-12 px-5 rounded-full text-[15px] font-semibold text-stone-700 hover:text-stone-900 hover:bg-stone-100/90 transition-colors"
             >
               Sign in
             </Link>
             <Link
               to="/register"
-              className="inline-flex items-center h-11 px-5 sm:px-6 rounded-full text-sm font-semibold text-white bg-[#0f9d8a] hover:bg-[#0d8a79] transition-all shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_6px_16px_-6px_rgba(15,157,138,0.55)]"
+              className="inline-flex items-center h-12 sm:h-[3.25rem] px-6 sm:px-7 rounded-full text-[15px] sm:text-base font-semibold text-white bg-[#0f9d8a] hover:bg-[#0d8a79] transition-all shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_8px_18px_-6px_rgba(15,157,138,0.55)]"
             >
               Join the floor
             </Link>

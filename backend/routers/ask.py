@@ -96,6 +96,7 @@ def _run_ask(
             "video_url": None,
             "image_url": image_url,
             "image_description": image_description or None,
+            "tip_image_url": None,
         }
 
     context = "\n\n".join(retrieved_chunks)
@@ -109,10 +110,15 @@ def _run_ask(
     prompt = ANSWER_PROMPT.format(context=context, question=enriched_question)
     answer_text = generate_text(prompt)
 
+    # Media from the best matching approved tip (not the worker's Ask attachment)
     video_url = None
+    tip_image_url = None
     for meta in retrieved_metadatas:
-        if meta.get("video_url"):
+        if not video_url and meta.get("video_url"):
             video_url = meta["video_url"]
+        if not tip_image_url and meta.get("image_url"):
+            tip_image_url = meta["image_url"]
+        if video_url and tip_image_url:
             break
 
     sources_used = len(retrieved_chunks)
@@ -122,8 +128,11 @@ def _run_ask(
         "answer": answer_text,
         "sources_used": sources_used,
         "video_url": video_url,
+        # Worker's photo attached to this Ask (if any)
         "image_url": image_url,
         "image_description": image_description or None,
+        # Photo stored on a retrieved approved tip
+        "tip_image_url": tip_image_url,
     }
 
 

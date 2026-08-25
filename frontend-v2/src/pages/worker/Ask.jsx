@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send, Sparkles, Factory, Video, Mic, Square, Loader2,
-  Volume2, BookOpen, User, Bot, Image as ImageIcon, X, Paperclip, Camera,
+  Volume2, BookOpen, User, Bot, Image as ImageIcon, X, Paperclip, Camera, Pause, Play,
 } from 'lucide-react';
 import { api, mediaUrl, ApiError } from '../../lib/api';
 import { Select, EmptyState, Button, Card } from '../../components/ui';
@@ -32,6 +32,7 @@ export default function Ask() {
   const [liveCaption, setLiveCaption] = useState('');
   const [transcribing, setTranscribing] = useState(false);
   const [speakingId, setSpeakingId] = useState(null);
+  const [speakState, setSpeakState] = useState('idle'); // idle | playing | paused
 
   const endRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -68,12 +69,34 @@ export default function Ask() {
       audioElRef.current = null;
     }
     setSpeakingId(null);
+    setSpeakState('idle');
+  };
+
+  const pauseSpeak = () => {
+    const a = audioElRef.current;
+    if (a && !a.paused) {
+      a.pause();
+      setSpeakState('paused');
+    }
+  };
+
+  const resumeSpeak = async () => {
+    const a = audioElRef.current;
+    if (a && a.paused) {
+      try {
+        await a.play();
+        setSpeakState('playing');
+      } catch (_) {
+        toast.error('Could not resume audio.');
+      }
+    }
   };
 
   const speakText = async (text, id) => {
     if (!text?.trim()) return;
     stopSpeak();
     setSpeakingId(id);
+    setSpeakState('playing');
     try {
       const result = await api.speak(text.trim(), languageRef.current || 'en-IN');
       const blob = result?.blob || result;
@@ -83,15 +106,19 @@ export default function Ask() {
       audioElRef.current = audio;
       audio.onended = () => {
         setSpeakingId(null);
+        setSpeakState('idle');
         URL.revokeObjectURL(url);
       };
       audio.onerror = () => {
         setSpeakingId(null);
+        setSpeakState('idle');
         URL.revokeObjectURL(url);
       };
       await audio.play();
+      setSpeakState('playing');
     } catch (_) {
       setSpeakingId(null);
+      setSpeakState('idle');
       toast.error('Could not play audio.');
     }
   };
@@ -202,11 +229,15 @@ export default function Ask() {
     else startListening();
   };
 
-  const clearImage = () => {
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
+  // revoke=true when user removes the draft photo.
+  // After send we keep the blob URL so the chat bubble can still show the image.
+  const clearImage = (revoke = true) => {
+    if (revoke && imagePreview) {
+      try { URL.revokeObjectURL(imagePreview); } catch (_) {}
+    }
     setImageFile(null);
     setImagePreview(null);
-  };
+  };;
 
   const onImagePick = (e) => {
     const f = e.target.files?.[0];
@@ -294,11 +325,11 @@ export default function Ask() {
         id: `w-${id}`,
         role: 'worker',
         text: q || '(Photo of the issue)',
-        imagePreview: preview || null,
+        imagePreview: preview || null, // keep blob URL alive for the bubble
       },
     ]);
     setQuestion('');
-    clearImage();
+    clearImage(false); // clear composer only — do not revoke message preview URL
     setAsking(true);
     try {
       const res = await api.ask(q, machineId, attached);
@@ -312,6 +343,7 @@ export default function Ask() {
           text: answer,
           sources: res.sources_used || res.sources || [],
           video: res.video_url,
+          tipImage: res.tip_image_url || null,
         },
       ]);
       if (autoSpeak) {
@@ -397,7 +429,7 @@ export default function Ask() {
                     </div>
                   )}
                   <div
-                    className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 border-2 ${
+                    className={`max-w-[90%] sm:max-w-[80%] rounded-2xl px-4 py-3 border-2 ${
                       m.role === 'worker'
                         ? 'bg-amber text-white border-amber rounded-br-md'
                         : 'bg-surface border-line rounded-bl-md shadow-sm'
@@ -410,42 +442,130 @@ export default function Ask() {
                       <button
                         type="button"
                         onClick={() => setLightboxSrc(m.imagePreview)}
-                        className="mt-2 block max-w-full text-left"
+                        className="mt-2.5 block w-full text-left"
                         title="View full image"
                       >
                         <img
                           src={m.imagePreview}
-                          alt="Attached"
-                          className="max-h-40 rounded-xl border border-white/20 object-contain cursor-zoom-in hover:opacity-95 transition-opacity"
+                          alt="Attached photo"
+                          className={`w-full max-h-48 rounded-xl object-cover cursor-zoom-in hover:opacity-95 transition-opacity ${
+                            m.role === 'worker'
+                              ? 'border-2 border-white/35'
+                              : 'border border-line'
+                          }`}
                         />
-                      </button>
-                    )}
-                    {m.role === 'ai' && (
-                      <div className="mt-3 pt-2 border-t border-line flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (speakingId === m.id) stopSpeak();
-                            else speakText(m.text, m.id);
-                          }}
-                          className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border transition-colors ${
-                            speakingId === m.id
-                              ? 'border-amber text-amber bg-amber/10'
-                              : 'border-line text-muted hover:border-signal hover:text-signal'
+                        <span
+                          className={`mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold ${
+                            m.role === 'worker' ? 'text-white/85' : 'text-muted'
                           }`}
                         >
-                          {speakingId === m.id ? <Square size={12} /> : <Volume2 size={13} />}
-                          {speakingId === m.id ? 'Stop' : 'Listen'}
-                        </button>
-                        {m.video && (
+                          <ImageIcon size={11} /> Photo attached · tap to enlarge
+                        </span>
+                      </button>
+                    )}
+                    {/* Source tip video — play inline in the chat bubble */}
+                    {m.role === 'ai' && m.video && (
+                      <div className="mt-3 rounded-xl overflow-hidden border-2 border-line bg-black">
+                        <video
+                          key={m.video}
+                          src={mediaUrl(m.video)}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          className="w-full max-h-56 object-contain bg-black"
+                        >
+                          Your browser does not support video playback.
+                        </video>
+                        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-surface-2 border-t border-line">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-amber">
+                            <Video size={11} /> Related tip video
+                          </span>
                           <a
                             href={mediaUrl(m.video)}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border border-line text-amber hover:border-amber"
+                            className="text-[11px] font-semibold text-muted hover:text-signal"
                           >
-                            <Video size={12} /> Watch clip
+                            Open full size
                           </a>
+                        </div>
+                      </div>
+                    )}
+                    {/* Source tip photo from approved knowledge */}
+                    {m.role === 'ai' && m.tipImage && (
+                      <div className="mt-3 rounded-xl overflow-hidden border-2 border-line bg-surface-2">
+                        <button
+                          type="button"
+                          onClick={() => setLightboxSrc(mediaUrl(m.tipImage))}
+                          className="block w-full text-left"
+                          title="View full image"
+                        >
+                          <img
+                            src={mediaUrl(m.tipImage)}
+                            alt="Related tip photo"
+                            className="w-full max-h-56 object-contain bg-black cursor-zoom-in"
+                          />
+                        </button>
+                        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-t border-line">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-signal">
+                            <ImageIcon size={11} /> Related tip photo
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setLightboxSrc(mediaUrl(m.tipImage))}
+                            className="text-[11px] font-semibold text-muted hover:text-signal"
+                          >
+                            Enlarge
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {m.role === 'ai' && (
+                      <div className="mt-3 pt-2 border-t border-line flex flex-wrap items-center gap-2">
+                        {speakingId === m.id && speakState === 'playing' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={pauseSpeak}
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border border-amber text-amber bg-amber/10 hover:bg-amber/15 transition-colors"
+                            >
+                              <Pause size={12} /> Pause
+                            </button>
+                            <button
+                              type="button"
+                              onClick={stopSpeak}
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border border-line text-muted hover:border-danger hover:text-danger transition-colors"
+                            >
+                              <Square size={12} /> Stop
+                            </button>
+                          </>
+                        )}
+                        {speakingId === m.id && speakState === 'paused' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={resumeSpeak}
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border border-signal text-signal bg-signal/10 hover:bg-signal/15 transition-colors"
+                            >
+                              <Play size={12} /> Resume
+                            </button>
+                            <button
+                              type="button"
+                              onClick={stopSpeak}
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border border-line text-muted hover:border-danger hover:text-danger transition-colors"
+                            >
+                              <Square size={12} /> Stop
+                            </button>
+                          </>
+                        )}
+                        {speakingId !== m.id && (
+                          <button
+                            type="button"
+                            onClick={() => speakText(m.text, m.id)}
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border border-line text-muted hover:border-signal hover:text-signal transition-colors"
+                          >
+                            <Volume2 size={13} /> Listen
+                          </button>
                         )}
                         {Array.isArray(m.sources) && m.sources.length > 0 && (
                           <span className="inline-flex items-center gap-1 text-[11px] text-muted">
@@ -630,6 +750,39 @@ export default function Ask() {
                 </button>
               </form>
             </div>
+
+            {speakingId && speakState !== 'idle' && (
+              <div className="mt-2 flex items-center gap-2 rounded-xl border-2 border-amber/40 bg-amber/10 px-3 py-2 text-sm">
+                <Volume2 size={16} className="text-amber shrink-0" />
+                <span className="font-semibold text-text flex-1 min-w-0">
+                  {speakState === 'paused' ? 'Answer paused' : 'Playing answer…'}
+                </span>
+                {speakState === 'playing' ? (
+                  <button
+                    type="button"
+                    onClick={pauseSpeak}
+                    className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg bg-white border border-amber/40 text-amber"
+                  >
+                    <Pause size={12} /> Pause
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={resumeSpeak}
+                    className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg bg-white border border-signal/40 text-signal"
+                  >
+                    <Play size={12} /> Resume
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={stopSpeak}
+                  className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg bg-white border border-line text-muted hover:text-danger"
+                >
+                  <Square size={12} /> Stop
+                </button>
+              </div>
+            )}
 
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted">
               <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">

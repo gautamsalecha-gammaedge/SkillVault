@@ -170,7 +170,13 @@ export const api = {
   workerMachines: (worker_id) => apiFetch(`/admin/worker-machines/${encodeURIComponent(worker_id)}`, { auth: 'admin' }),
 
   pendingEntries: (machine_id) => apiFetch(`/admin/pending?machine_id=${encodeURIComponent(machine_id)}`, { auth: 'admin' }),
+  knowledgeEntries: (machine_id, status = 'pending') =>
+    apiFetch(
+      `/admin/knowledge?machine_id=${encodeURIComponent(machine_id)}&status=${encodeURIComponent(status)}`,
+      { auth: 'admin' },
+    ),
   approveEntry: (entry_id) => apiFetch(`/admin/approve/${encodeURIComponent(entry_id)}`, { method: 'POST', auth: 'admin' }),
+  rejectEntry: (entry_id) => apiFetch(`/admin/reject/${encodeURIComponent(entry_id)}`, { method: 'POST', auth: 'admin' }),
   deleteEntry: (entry_id) => apiFetch(`/admin/delete/${encodeURIComponent(entry_id)}`, { method: 'DELETE', auth: 'admin' }),
   editEntry: (entry_id, text) => apiFetch(`/admin/edit/${encodeURIComponent(entry_id)}`, { method: 'PUT', auth: 'admin', body: { text } }),
 

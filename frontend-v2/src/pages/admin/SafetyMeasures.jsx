@@ -17,8 +17,15 @@ import { useToast } from '../../components/Toast';
  * - Completions is a proper in-page panel
  */
 
+function sortMeasures(list) {
+  return (list || []).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+}
+
 export default function SafetyMeasures() {
   const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
   const [machines, setMachines] = useState([]);
   const [machineId, setMachineId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -29,55 +36,77 @@ export default function SafetyMeasures() {
   const [completions, setCompletions] = useState([]);
   const [completionsLoading, setCompletionsLoading] = useState(false);
 
-  // Load machines once; keep full-page loader until we have an initial machine (or know there are none)
+  // Always start at top of page when opening this route
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
+  // Single sequential bootstrap: machines THEN first machine's measures.
+  // Avoids the race where machineId was set and loading flipped false before measures arrived
+  // (blank page on first nav; content only after clicking Safety Measures again).
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         const r = await api.allMachines();
         if (cancelled) return;
-        const ids = r.machine_ids || [];
+        const ids = Array.isArray(r?.machine_ids) ? r.machine_ids : [];
         setMachines(ids);
-        if (ids.length) {
-          setMachineId((prev) => prev || ids[0]);
-        } else {
-          setLoading(false);
+        if (!ids.length) {
+          setMachineId('');
+          setMeasures([]);
+          return;
         }
-      } catch {
+        const mid = ids[0];
+        setMachineId(mid);
+        const mr = await api.adminSafetyMeasures(mid);
+        if (cancelled) return;
+        setMeasures(sortMeasures(mr?.measures));
+      } catch (err) {
         if (!cancelled) {
           setMachines([]);
-          setLoading(false);
+          setMachineId('');
+          setMeasures([]);
+          toastRef.current.error(
+            err instanceof ApiError ? err.message : 'Could not load safety measures.'
+          );
         }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  const loadMeasures = useCallback(async (mid, isInitial = false) => {
+  const loadMeasures = useCallback(async (mid, { fullPage = false } = {}) => {
     if (!mid) {
       setMeasures([]);
-      setLoading(false);
+      if (fullPage) setLoading(false);
+      setMeasuresLoading(false);
       return;
     }
-    if (!isInitial) setMeasuresLoading(true);
+    if (fullPage) setLoading(true);
+    else setMeasuresLoading(true);
     try {
       const r = await api.adminSafetyMeasures(mid);
-      setMeasures((r.measures || []).slice().sort((a, b) => a.sort_order - b.sort_order));
+      setMeasures(sortMeasures(r?.measures));
     } catch (err) {
       setMeasures([]);
-      toast.error(err instanceof ApiError ? err.message : 'Could not load safety steps.');
+      toastRef.current.error(err instanceof ApiError ? err.message : 'Could not load safety steps.');
     } finally {
       setMeasuresLoading(false);
-      setLoading(false);
+      if (fullPage) setLoading(false);
     }
-  }, [toast]);
+  }, []);
 
-  useEffect(() => {
-    if (!machineId) return;
-    // First time we get a machineId, still show the full-page loader until measures arrive
-    const isInitial = loading;
-    loadMeasures(machineId, isInitial);
-  }, [machineId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const changeMachine = (mid) => {
+    if (!mid || mid === machineId) return;
+    setMachineId(mid);
+    setPanel(null);
+    setEditing(null);
+    loadMeasures(mid, { fullPage: false });
+  };
 
   const reorder = async (newOrder) => {
     setMeasures(newOrder);
@@ -86,7 +115,7 @@ export default function SafetyMeasures() {
       await api.reorderSafetyMeasures(items);
     } catch {
       toast.error('Could not save order.');
-      loadMeasures(machineId);
+      loadMeasures(machineId, { fullPage: false });
     }
   };
 
@@ -133,8 +162,6 @@ export default function SafetyMeasures() {
     setEditing(null);
   };
 
-  if (loading) return <FullPageLoader label="Loading safety measures…" />;
-
   return (
     <div className="max-w-5xl relative">
       <PageHeader
@@ -142,38 +169,37 @@ export default function SafetyMeasures() {
         title="Safety measures"
         description="Ordered steps every worker completes before starting on a machine. Drag to reorder. Edit or add steps in the studio panel."
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {machines.length > 0 && (
-              <Select
-                value={machineId}
-                onChange={(e) => {
-                  setLoading(true);
-                  setMachineId(e.target.value);
-                  setPanel(null);
-                  setEditing(null);
-                }}
-                className="min-w-[160px]"
-              >
-                {machines.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </Select>
-            )}
-            {machineId && (
-              <>
-                <Button size="sm" variant="ghost" icon={Users} onClick={openCompletions}>
-                  Completions
-                </Button>
-                <Button size="sm" icon={Plus} onClick={openCreate}>
-                  Add step
-                </Button>
-              </>
-            )}
-          </div>
+          !loading && (
+            <div className="flex flex-wrap items-center gap-2">
+              {machines.length > 0 && (
+                <Select
+                  value={machineId}
+                  onChange={(e) => changeMachine(e.target.value)}
+                  className="min-w-[160px]"
+                >
+                  {machines.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </Select>
+              )}
+              {machineId && (
+                <>
+                  <Button size="sm" variant="ghost" icon={Users} onClick={openCompletions}>
+                    Completions
+                  </Button>
+                  <Button size="sm" icon={Plus} onClick={openCreate}>
+                    Add step
+                  </Button>
+                </>
+              )}
+            </div>
+          )
         }
       />
 
-      {!machines.length ? (
+      {loading ? (
+        <FullPageLoader label="Loading safety measures…" />
+      ) : !machines.length ? (
         <EmptyState
           icon={ShieldCheck}
           title="No machines yet"
@@ -260,7 +286,7 @@ export default function SafetyMeasures() {
             onClose={closePanel}
             onSaved={() => {
               closePanel();
-              loadMeasures(machineId);
+              loadMeasures(machineId, { fullPage: false });
             }}
             onRetake={async (workerId) => {
               try {

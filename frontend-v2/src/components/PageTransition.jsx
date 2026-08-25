@@ -1,14 +1,9 @@
-import { motion } from 'framer-motion';
 
+/**
+ * Plain wrapper — no framer-motion.
+ * Motion + AnimatePresence was shifting page content down the viewport
+ * until a second sidebar click. Layout stability > page fade.
+ */
 export default function PageTransition({ children }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      transition={{ duration: 0.28, ease: [0.16, 0.8, 0.24, 1] }}
-    >
-      {children}
-    </motion.div>
-  );
+  return <div className="w-full">{children}</div>;
 }

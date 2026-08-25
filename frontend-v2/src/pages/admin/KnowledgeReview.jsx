@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, Trash2, Pencil, Video, BookOpenText, Mic2, ChevronDown, X,
   User, MessageSquare, AlertCircle, RefreshCw, Factory, Clock, Layers, Sparkles,
+  Ban, RotateCcw,
 } from 'lucide-react';
 import { api, mediaUrl, ApiError } from '../../lib/api';
 import { PageHeader, Select, Card, Button, EmptyState, Badge, Textarea, FullPageLoader } from '../../components/ui';
@@ -96,161 +97,322 @@ export default function KnowledgeReview() {
 
 function TipsTab({ machineId }) {
   const toast = useToast();
-  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('pending');
   const [entries, setEntries] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const [editText, setEditText] = useState('');
+  const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [editText, setEditText] = useState('');
   const [lightbox, setLightbox] = useState(null);
+  const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (!machineId) return;
     setLoading(true);
-    api.pendingEntries(machineId)
-      .then((r) => setEntries(r.pending_entries || []))
-      .catch(() => setEntries([]))
-      .finally(() => setLoading(false));
-  }, [machineId]);
+    try {
+      const [cur, pend, appr, rej] = await Promise.all([
+        api.knowledgeEntries(machineId, statusFilter),
+        api.knowledgeEntries(machineId, 'pending'),
+        api.knowledgeEntries(machineId, 'approved'),
+        api.knowledgeEntries(machineId, 'rejected'),
+      ]);
+      setEntries(cur.entries || cur.pending_entries || []);
+      setCounts({
+        pending: pend.count ?? (pend.entries || []).length,
+        approved: appr.count ?? (appr.entries || []).length,
+        rejected: rej.count ?? (rej.entries || []).length,
+      });
+    } catch (err) {
+      setEntries([]);
+      toast.error(err instanceof ApiError ? err.message : 'Could not load tips.');
+    } finally {
+      setLoading(false);
+    }
+  }, [machineId, statusFilter, toast]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const approve = async (id) => {
     setBusyId(id);
     try {
       await api.approveEntry(id);
-      setEntries((e) => e.filter((x) => x.id !== id));
       toast.success('Tip approved — now live for Ask.');
+      await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not approve.');
-    } finally { setBusyId(null); }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const reject = async (id) => {
+    setBusyId(id);
+    try {
+      await api.rejectEntry(id);
+      toast.info('Tip rejected — kept in history, hidden from Ask.');
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Could not reject.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const remove = async (id) => {
+    if (!window.confirm('Permanently delete this tip? This cannot be undone.')) return;
     setBusyId(id);
     try {
       await api.deleteEntry(id);
-      setEntries((e) => e.filter((x) => x.id !== id));
-      toast.info('Tip deleted.');
+      toast.info('Tip permanently deleted.');
+      await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not delete.');
-    } finally { setBusyId(null); }
+    } finally {
+      setBusyId(null);
+    }
   };
-
-  const startEdit = (entry) => { setEditingId(entry.id); setEditText(entry.text || ''); };
 
   const saveEdit = async (id) => {
     setBusyId(id);
     try {
       await api.editEntry(id, editText);
-      setEntries((e) => e.map((x) => (x.id === id ? { ...x, text: editText } : x)));
-      setEditingId(null);
-      toast.success('Tip updated.');
+      setEditId(null);
+      toast.success('Tip text updated.');
+      await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not save edit.');
-    } finally { setBusyId(null); }
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  if (loading) return <FullPageLoader label="Loading pending tips…" />;
-  if (entries.length === 0) {
-    return (
-      <EmptyState
-        icon={BookOpenText}
-        title="Tips queue is clear"
-        description="No pending tips for this machine. Worker submissions will land here for review."
-      />
-    );
+  const filters = [
+    { id: 'pending', label: 'Pending', count: counts.pending, tone: 'amber' },
+    { id: 'approved', label: 'Approved', count: counts.approved, tone: 'signal' },
+    { id: 'rejected', label: 'Rejected', count: counts.rejected, tone: 'default' },
+  ];
+
+  if (loading && entries.length === 0) {
+    return <FullPageLoader label="Loading tips…" />;
   }
 
   return (
-    <>
-      <div className="space-y-4">
-        {entries.map((e, i) => (
-          <motion.div key={e.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-            <Card className="p-6 relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber via-amber/50 to-transparent" />
-              <div className="flex items-start justify-between gap-3 mb-4">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-10 h-10 rounded-full bg-amber/15 border border-amber/30 flex items-center justify-center text-amber shrink-0">
-                    <User size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-sm truncate">{e.worker_name || 'Worker'}</p>
-                    <p className="font-mono text-[11px] text-muted">{e.worker_id}</p>
-                  </div>
-                </div>
-                <Badge tone="amber">Pending</Badge>
-              </div>
-
-              {editingId === e.id ? (
-                <div className="mb-4">
-                  <Textarea value={editText} onChange={(ev) => setEditText(ev.target.value)} rows={5} className="text-[15px]" />
-                  <div className="flex gap-2 mt-3">
-                    <Button size="sm" icon={Check} onClick={() => saveEdit(e.id)} loading={busyId === e.id}>Save</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Cancel</Button>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[15px] text-text leading-relaxed mb-4 whitespace-pre-wrap">{e.text}</p>
-              )}
-
-              {(e.video_url || e.image_url) && (
-                <div className="mb-4 space-y-3">
-                  {e.video_url && (
-                    <div className="rounded-xl border-2 border-line overflow-hidden bg-surface-2">
-                      <video src={mediaUrl(e.video_url)} controls className="w-full max-h-56 bg-black" />
-                      {(e.video_description || e.transcript) && (
-                        <div className="p-3 border-t border-line">
-                          {e.video_description && (
-                            <>
-                              <p className="text-[10px] font-mono uppercase text-amber mb-1">Video understanding</p>
-                              <p className="text-sm text-text/85 leading-relaxed">{e.video_description}</p>
-                            </>
-                          )}
-                          {e.transcript && <p className="text-xs text-muted mt-2 italic">Transcript: {e.transcript}</p>}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {e.image_url && (
-                    <div className="rounded-xl border-2 border-line overflow-hidden bg-surface-2">
-                      <button type="button" onClick={() => setLightbox(mediaUrl(e.image_url))} className="block w-full">
-                        <img src={mediaUrl(e.image_url)} alt="Tip" className="w-full max-h-48 object-contain cursor-zoom-in bg-black/5" />
-                      </button>
-                      {e.image_description && (
-                        <div className="p-3 border-t border-line">
-                          <p className="text-[10px] font-mono uppercase text-amber mb-1">Image understanding</p>
-                          <p className="text-sm text-text/85 leading-relaxed">{e.image_description}</p>
-                          {e.image_visible_text && <p className="text-xs text-muted mt-2">Visible text: {e.image_visible_text}</p>}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {editingId !== e.id && (
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" icon={Check} onClick={() => approve(e.id)} loading={busyId === e.id}>Approve</Button>
-                  <Button size="sm" variant="ghost" icon={Pencil} onClick={() => startEdit(e)}>Edit</Button>
-                  <Button size="sm" variant="danger" icon={Trash2} onClick={() => remove(e.id)} loading={busyId === e.id}>Delete</Button>
-                </div>
-              )}
-            </Card>
-          </motion.div>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {filters.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setStatusFilter(f.id)}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-semibold border-2 transition-colors ${
+              statusFilter === f.id
+                ? f.id === 'pending'
+                  ? 'bg-amber/15 border-amber text-amber'
+                  : f.id === 'approved'
+                    ? 'bg-signal/15 border-signal text-signal'
+                    : 'bg-surface-2 border-text/30 text-text'
+                : 'border-line text-muted hover:text-text hover:border-line'
+            }`}
+          >
+            {f.label}
+            <span
+              className={`min-w-[1.4rem] h-5 px-1.5 rounded-full text-[11px] font-bold flex items-center justify-center ${
+                statusFilter === f.id ? 'bg-white/80 text-text' : 'bg-surface-2 text-muted'
+              }`}
+            >
+              {f.count}
+            </span>
+          </button>
         ))}
+        <button
+          type="button"
+          onClick={load}
+          className="ml-auto text-sm font-semibold text-muted hover:text-signal px-3 py-2"
+        >
+          Refresh
+        </button>
       </div>
 
-      <AnimatePresence>
-        {lightbox && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/80" onClick={() => setLightbox(null)}>
-            <button type="button" className="absolute top-4 right-4 w-11 h-11 rounded-full bg-white/15 text-white flex items-center justify-center" onClick={() => setLightbox(null)}>
-              <X size={22} />
-            </button>
-            <img src={lightbox} alt="" className="max-w-full max-h-[88vh] rounded-2xl object-contain" onClick={(ev) => ev.stopPropagation()} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
+      <p className="text-[15px] text-muted">
+        {statusFilter === 'pending' && 'Tips waiting for review. Approve to make them searchable in Ask; reject to keep history without going live.'}
+        {statusFilter === 'approved' && 'Live tips used when workers ask about this machine. You can reject or delete if something should come down.'}
+        {statusFilter === 'rejected' && 'Rejected tips stay here for audit. Re-approve to put them back into Ask, or delete permanently.'}
+      </p>
+
+      {entries.length === 0 ? (
+        <EmptyState
+          icon={BookOpenText}
+          title={
+            statusFilter === 'pending'
+              ? 'No pending tips'
+              : statusFilter === 'approved'
+                ? 'No approved tips yet'
+                : 'No rejected tips'
+          }
+          description={
+            statusFilter === 'pending'
+              ? 'Worker submissions for this machine will land here for review.'
+              : statusFilter === 'approved'
+                ? 'Approved tips for this machine will show here once you clear the queue.'
+                : 'Rejected tips are kept for history when you reject instead of hard-delete.'
+          }
+        />
+      ) : (
+        <div className="space-y-3">
+          {entries.map((e) => {
+            const st = e.status || statusFilter;
+            return (
+              <Card key={e.id} className="p-5 relative overflow-hidden">
+                <div
+                  className={`absolute left-0 top-0 bottom-0 w-1 ${
+                    st === 'approved' ? 'bg-signal' : st === 'rejected' ? 'bg-muted' : 'bg-amber'
+                  }`}
+                />
+                <div className="pl-2">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <div className="w-9 h-9 rounded-full bg-amber/15 border border-amber/30 flex items-center justify-center text-amber text-sm font-bold shrink-0">
+                      {(e.worker_name || e.worker_id || '?').slice(0, 1).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-text text-[15px]">
+                        {e.worker_name || 'Worker'}{' '}
+                        <span className="font-mono text-muted text-xs font-normal">· {e.worker_id}</span>
+                      </p>
+                    </div>
+                    <Badge
+                      tone={st === 'approved' ? 'signal' : st === 'rejected' ? 'default' : 'amber'}
+                      className="ml-auto"
+                    >
+                      {st}
+                    </Badge>
+                  </div>
+
+                  {editId === e.id ? (
+                    <div className="space-y-2 mb-3">
+                      <textarea
+                        value={editText}
+                        onChange={(ev) => setEditText(ev.target.value)}
+                        rows={5}
+                        className="w-full rounded-xl border-2 border-line bg-surface-2 px-3 py-2 text-[15px] text-text"
+                      />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => saveEdit(e.id)} loading={busyId === e.id}>
+                          Save
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditId(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[15px] text-text leading-relaxed whitespace-pre-wrap mb-3">
+                      {e.text}
+                    </p>
+                  )}
+
+                  {(e.video_url || e.image_url) && (
+                    <div className="mb-3 space-y-2">
+                      {e.video_url && (
+                        <video
+                          src={mediaUrl(e.video_url)}
+                          controls
+                          className="w-full max-h-52 rounded-xl bg-black"
+                          preload="metadata"
+                        />
+                      )}
+                      {e.image_url && (
+                        <button type="button" onClick={() => setLightbox(mediaUrl(e.image_url))} className="block">
+                          <img
+                            src={mediaUrl(e.image_url)}
+                            alt="Tip"
+                            className="max-h-40 rounded-xl border border-line object-contain cursor-zoom-in"
+                          />
+                        </button>
+                      )}
+                      {(e.video_description || e.image_description) && (
+                        <div className="rounded-xl bg-surface-2 border border-line px-3 py-2 text-[13px] text-muted leading-relaxed">
+                          {e.video_description && (
+                            <p>
+                              <span className="font-semibold text-amber uppercase text-[10px] tracking-wide">
+                                Video understanding
+                              </span>
+                              <br />
+                              {e.video_description}
+                            </p>
+                          )}
+                          {e.image_description && (
+                            <p className={e.video_description ? 'mt-2' : ''}>
+                              <span className="font-semibold text-signal uppercase text-[10px] tracking-wide">
+                                Image understanding
+                              </span>
+                              <br />
+                              {e.image_description}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    {(st === 'pending' || st === 'rejected') && (
+                      <Button size="sm" icon={Check} onClick={() => approve(e.id)} loading={busyId === e.id}>
+                        {st === 'rejected' ? 'Re-approve' : 'Approve'}
+                      </Button>
+                    )}
+                    {st === 'pending' && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={Pencil}
+                        onClick={() => {
+                          setEditId(e.id);
+                          setEditText(e.text || '');
+                        }}
+                      >
+                        Edit
+                      </Button>
+                    )}
+                    {(st === 'pending' || st === 'approved') && (
+                      <Button size="sm" variant="ghost" icon={Ban} onClick={() => reject(e.id)} loading={busyId === e.id}>
+                        Reject
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" icon={Trash2} onClick={() => remove(e.id)} loading={busyId === e.id}>
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/80"
+          onClick={() => setLightbox(null)}
+          role="presentation"
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center"
+            onClick={() => setLightbox(null)}
+          >
+            ×
+          </button>
+          <img
+            src={lightbox}
+            alt="Full"
+            className="max-w-full max-h-[90vh] rounded-xl object-contain"
+            onClick={(ev) => ev.stopPropagation()}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
