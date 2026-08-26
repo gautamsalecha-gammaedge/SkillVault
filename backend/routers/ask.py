@@ -45,6 +45,41 @@ def _assert_machine_assignment(db: Session, worker_id: str, machine_id: str):
         )
 
 
+def _normalize_history(history):
+    """Keep last N turns, normalize roles, drop empty text."""
+    if not history:
+        return []
+    out = []
+    for turn in history:
+        if isinstance(turn, dict):
+            role = (turn.get("role") or "").strip().lower()
+            text = (turn.get("text") or "").strip()
+        else:
+            role = (getattr(turn, "role", None) or "").strip().lower()
+            text = (getattr(turn, "text", None) or "").strip()
+        if not text:
+            continue
+        if role in ("worker", "user", "human"):
+            role = "worker"
+        elif role in ("ai", "assistant", "bot"):
+            role = "ai"
+        else:
+            continue
+        out.append({"role": role, "text": text[:1200]})
+    # Context window: last 8 turns (~4 Q&A pairs)
+    return out[-8:]
+
+
+def _format_history_block(history) -> str:
+    if not history:
+        return ""
+    lines = []
+    for t in history:
+        who = "Worker" if t["role"] == "worker" else "Assistant"
+        lines.append(f"{who}: {t['text']}")
+    return "\n".join(lines)
+
+
 def _run_ask(
     *,
     question: str,
@@ -54,6 +89,7 @@ def _run_ask(
     image_description: str = "",
     image_visible_text: str = "",
     image_url: Optional[str] = None,
+    history=None,
 ):
     question = (question or "").strip()
     if not question and not image_description:
@@ -62,11 +98,24 @@ def _run_ask(
             detail="Provide a question, or attach an image of the issue.",
         )
 
+    prior = _normalize_history(history)
+    history_block = _format_history_block(prior)
+
+    # Retrieval: current question + recent worker questions (follow-ups need prior topic)
+    prior_worker_bits = [
+        t["text"] for t in prior if t["role"] == "worker"
+    ][-3:]
     retrieval_query = question
+    if prior_worker_bits:
+        retrieval_query = (
+            "Earlier in this conversation the worker asked:\n"
+            + "\n".join(f"- {b}" for b in prior_worker_bits)
+            + f"\n\nCurrent question: {question or '(see photo)'}"
+        )
     if image_description:
         retrieval_query = (
-            f"{question}\n\n[Photo of issue]: {image_description}".strip()
-            if question
+            f"{retrieval_query}\n\n[Photo of issue]: {image_description}".strip()
+            if retrieval_query
             else f"[Photo of issue]: {image_description}"
         )
     if image_visible_text:
@@ -87,6 +136,9 @@ def _run_ask(
 
     retrieved_chunks = results["documents"][0] if results["documents"] else []
     retrieved_metadatas = results["metadatas"][0] if results["metadatas"] else []
+    retrieved_distances = (
+        results["distances"][0] if results.get("distances") else []
+    )
 
     if not retrieved_chunks:
         _log_question(db, worker["worker_id"], machine_id, 0)
@@ -102,6 +154,14 @@ def _run_ask(
     context = "\n\n".join(retrieved_chunks)
 
     enriched_question = question or "What is wrong here based on this photo?"
+    if history_block:
+        enriched_question = (
+            "This is a continuing conversation on the same machine. "
+            "Use the prior turns only to resolve references (e.g. 'it', 'that noise', 'the same issue'). "
+            "Do not invent details that are not in the knowledge context or prior turns.\n\n"
+            f"Prior conversation:\n{history_block}\n\n"
+            f"Current question: {enriched_question}"
+        )
     if image_description:
         enriched_question += f"\n\nWorker attached a photo. Visual description: {image_description}"
     if image_visible_text:
@@ -110,16 +170,20 @@ def _run_ask(
     prompt = ANSWER_PROMPT.format(context=context, question=enriched_question)
     answer_text = generate_text(prompt)
 
-    # Media from the best matching approved tip (not the worker's Ask attachment)
+    # Tip media ONLY from the top match, and only when similarity is strong enough.
+    # Vague questions often retrieve weak matches — attaching random tip video/photo is wrong.
+    # Chroma distances are lower = closer (L2 / cosine-distance style).
+    MEDIA_MAX_DISTANCE = 0.55
     video_url = None
     tip_image_url = None
-    for meta in retrieved_metadatas:
-        if not video_url and meta.get("video_url"):
-            video_url = meta["video_url"]
-        if not tip_image_url and meta.get("image_url"):
-            tip_image_url = meta["image_url"]
-        if video_url and tip_image_url:
-            break
+    if retrieved_metadatas:
+        top_meta = retrieved_metadatas[0] or {}
+        top_dist = retrieved_distances[0] if retrieved_distances else None
+        # If distance is missing, still require the top chunk text to look related:
+        # only attach media when we have a numeric score under the threshold.
+        if top_dist is not None and top_dist <= MEDIA_MAX_DISTANCE:
+            video_url = top_meta.get("video_url") or None
+            tip_image_url = top_meta.get("image_url") or None
 
     sources_used = len(retrieved_chunks)
     _log_question(db, worker["worker_id"], machine_id, sources_used)
@@ -131,7 +195,7 @@ def _run_ask(
         # Worker's photo attached to this Ask (if any)
         "image_url": image_url,
         "image_description": image_description or None,
-        # Photo stored on a retrieved approved tip
+        # Photo stored on a retrieved approved tip (only if top match is close)
         "tip_image_url": tip_image_url,
     }
 
@@ -149,6 +213,7 @@ def ask(
         machine_id=req.machine_id,
         worker=worker,
         db=db,
+        history=req.history,
     )
 
 
@@ -156,6 +221,7 @@ def ask(
 async def ask_with_media(
     question: str = Form(""),
     machine_id: str = Form(...),
+    history: str = Form(""),
     image: Optional[UploadFile] = File(None),
     worker: dict = Depends(require_worker),
     db: Session = Depends(get_db),
@@ -208,6 +274,16 @@ async def ask_with_media(
             image_description = ""
             image_visible_text = ""
 
+    history_list = None
+    if history and history.strip():
+        try:
+            import json as _json
+            parsed = _json.loads(history)
+            if isinstance(parsed, list):
+                history_list = parsed
+        except Exception:
+            history_list = None
+
     return _run_ask(
         question=question,
         machine_id=machine_id,
@@ -216,6 +292,7 @@ async def ask_with_media(
         image_description=image_description,
         image_visible_text=image_visible_text,
         image_url=image_url,
+        history=history_list,
     )
 
 

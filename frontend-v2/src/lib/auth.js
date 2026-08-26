@@ -1,39 +1,108 @@
-/* Session storage — same localStorage keys as the legacy build so a
-   session stays valid regardless of which frontend is loaded against
-   the same backend during rollout. */
+/* SkillVault — session helpers (localStorage keys shared with legacy UI) */
 
-const KEYS = {
-  workerToken: 'sv_worker_token',
-  workerName: 'sv_worker_name',
-  workerId: 'sv_worker_id',
-  adminToken: 'sv_admin_token',
-  adminName: 'sv_admin_name',
-};
+const W_TOKEN = 'sv_worker_token';
+const W_NAME = 'sv_worker_name';
+const W_ID = 'sv_worker_id';
+const A_TOKEN = 'sv_admin_token';
+const A_NAME = 'sv_admin_name';
 
-export const getWorkerToken = () => localStorage.getItem(KEYS.workerToken);
-export const getWorkerName = () => localStorage.getItem(KEYS.workerName);
-export const getWorkerId = () => localStorage.getItem(KEYS.workerId);
-export const getAdminToken = () => localStorage.getItem(KEYS.adminToken);
-export const getAdminName = () => localStorage.getItem(KEYS.adminName);
-
-export function setWorkerSession(token, name, worker_id) {
-  localStorage.setItem(KEYS.workerToken, token);
-  localStorage.setItem(KEYS.workerName, name);
-  localStorage.setItem(KEYS.workerId, worker_id);
+export function getWorkerToken() {
+  try { return localStorage.getItem(W_TOKEN); } catch { return null; }
 }
-export function setAdminSession(token, name) {
-  localStorage.setItem(KEYS.adminToken, token);
-  if (name) localStorage.setItem(KEYS.adminName, name);
+export function getWorkerName() {
+  try { return localStorage.getItem(W_NAME); } catch { return null; }
 }
-export function setWorkerName(name) { localStorage.setItem(KEYS.workerName, name); }
-export function setAdminName(name) { localStorage.setItem(KEYS.adminName, name); }
+export function getWorkerId() {
+  try { return localStorage.getItem(W_ID); } catch { return null; }
+}
+export function setWorkerName(name) {
+  try {
+    if (name != null) localStorage.setItem(W_NAME, name);
+  } catch (_) {}
+}
+export function setWorkerId(id) {
+  try {
+    if (id != null) localStorage.setItem(W_ID, id);
+  } catch (_) {}
+}
+
+/** setWorkerSession(token, name, workerId) or setWorkerSession({ token, name, worker_id }) */
+export function setWorkerSession(tokenOrObj, name, workerId) {
+  let token = tokenOrObj;
+  let n = name;
+  let id = workerId;
+  if (tokenOrObj && typeof tokenOrObj === 'object') {
+    token = tokenOrObj.token;
+    n = tokenOrObj.name;
+    id = tokenOrObj.worker_id ?? tokenOrObj.workerId;
+  }
+  try {
+    if (token) localStorage.setItem(W_TOKEN, token);
+    if (n != null) localStorage.setItem(W_NAME, n);
+    if (id != null) localStorage.setItem(W_ID, id);
+  } catch (_) {}
+}
+
+export function getAdminToken() {
+  try { return localStorage.getItem(A_TOKEN); } catch { return null; }
+}
+export function getAdminName() {
+  try { return localStorage.getItem(A_NAME); } catch { return null; }
+}
+export function setAdminName(name) {
+  try {
+    if (name != null) localStorage.setItem(A_NAME, name);
+  } catch (_) {}
+}
+
+/** setAdminSession(token, name) or setAdminSession({ token, name }) */
+export function setAdminSession(tokenOrObj, name) {
+  let token = tokenOrObj;
+  let n = name;
+  if (tokenOrObj && typeof tokenOrObj === 'object') {
+    token = tokenOrObj.token;
+    n = tokenOrObj.name;
+  }
+  try {
+    if (token) localStorage.setItem(A_TOKEN, token);
+    if (n != null) localStorage.setItem(A_NAME, n);
+  } catch (_) {}
+}
+
+/** Wipe Ask chat cache (all workers / legacy keys). */
+export function clearAskChatStorage() {
+  try {
+    const keys = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (
+        k &&
+        (k.startsWith('sv_ask_') ||
+          k === 'sv_ask_thread' ||
+          k === 'sv_ask_machine' ||
+          k === 'sv_ask_auto_speak' ||
+          k === 'sv_ask_threads_by_machine' ||
+          k === 'sv_ask_owner')
+      ) {
+        keys.push(k);
+      }
+    }
+    keys.forEach((k) => sessionStorage.removeItem(k));
+  } catch (_) {}
+}
 
 export function clearWorkerSession() {
-  localStorage.removeItem(KEYS.workerToken);
-  localStorage.removeItem(KEYS.workerName);
-  localStorage.removeItem(KEYS.workerId);
+  try {
+    localStorage.removeItem(W_TOKEN);
+    localStorage.removeItem(W_NAME);
+    localStorage.removeItem(W_ID);
+  } catch (_) {}
+  clearAskChatStorage();
 }
+
 export function clearAdminSession() {
-  localStorage.removeItem(KEYS.adminToken);
-  localStorage.removeItem(KEYS.adminName);
+  try {
+    localStorage.removeItem(A_TOKEN);
+    localStorage.removeItem(A_NAME);
+  } catch (_) {}
 }

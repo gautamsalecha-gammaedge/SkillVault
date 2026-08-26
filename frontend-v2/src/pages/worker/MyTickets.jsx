@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Ticket, Plus, List, CheckCircle2, Clock, AlertCircle,
-  ChevronDown, Wrench, Sparkles,
+  ChevronDown, Wrench, Sparkles, Mic, Square, Loader2,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
+import { transcribeSmart, defaultLanguage } from '../../lib/voice';
 import {
   PageHeader, FullPageLoader, EmptyState, Badge, Card,
   Input, Textarea, Select, Button,
@@ -50,6 +51,18 @@ export default function MyTickets() {
   const [form, setForm] = useState({ title: '', description: '', machine_id: '', priority: 'Medium' });
   const [submitting, setSubmitting] = useState(false);
 
+  // Voice → description (browser STT primary, Sarvam fallback)
+  const [listening, setListening] = useState(false);
+  const [liveCaption, setLiveCaption] = useState('');
+  const [transcribing, setTranscribing] = useState(false);
+  const [micTarget, setMicTarget] = useState('description'); // title | description
+  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const audioStreamRef = useRef(null);
+  const browserFinalRef = useRef('');
+  const languageRef = useRef(defaultLanguage());
+
   const load = () => {
     setLoading(true);
     api.myTickets()
@@ -65,7 +78,163 @@ export default function MyTickets() {
         if (r.machine_ids?.length) setForm((f) => ({ ...f, machine_id: r.machine_ids[0] }));
       })
       .catch(() => {});
+    return () => {
+      try { recognitionRef.current?.stop(); } catch (_) {}
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch (_) {}
+      try {
+        audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
+      } catch (_) {}
+    };
   }, []);
+
+  const startListening = async (target) => {
+    try {
+      setMicTarget(target || 'description');
+      setLiveCaption('');
+      browserFinalRef.current = '';
+      setListening(true);
+      const lang = languageRef.current || defaultLanguage();
+      const SR = typeof window !== 'undefined'
+        ? (window.SpeechRecognition || window.webkitSpeechRecognition)
+        : null;
+      if (SR) {
+        try {
+          const rec = new SR();
+          recognitionRef.current = rec;
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = lang;
+          rec.onresult = (event) => {
+            let interim = '';
+            let final = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const r = event.results[i];
+              if (r.isFinal) final += r[0].transcript;
+              else interim += r[0].transcript;
+            }
+            if (final) {
+              browserFinalRef.current = `${browserFinalRef.current} ${final}`.trim();
+              const field = target || 'description';
+              setForm((f) => ({
+                ...f,
+                [field]: (f[field] ? `${f[field]} ${final}` : final).trim(),
+              }));
+              setLiveCaption(interim);
+            } else {
+              setLiveCaption(interim);
+            }
+          };
+          rec.onerror = () => {};
+          try { rec.start(); } catch (_) {}
+        } catch (_) {}
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
+        audioChunksRef.current = [];
+        const mr = new MediaRecorder(stream);
+        mediaRecorderRef.current = mr;
+        mr.ondataavailable = (e) => {
+          if (e.data && e.data.size) audioChunksRef.current.push(e.data);
+        };
+        mr.start();
+      } catch (_) {
+        if (!SR) {
+          toast.error('Microphone access denied.');
+          setListening(false);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setListening(false);
+      toast.error('Could not start microphone.');
+    }
+  };
+
+  const finishListening = async () => {
+    const field = micTarget || 'description';
+    setListening(false);
+    setLiveCaption('');
+    try { recognitionRef.current?.stop(); } catch (_) {}
+    recognitionRef.current = null;
+    const browserText = (browserFinalRef.current || '').trim();
+    browserFinalRef.current = '';
+
+    const apply = (next, lang) => {
+      if (!next) return;
+      if (lang) languageRef.current = lang;
+      setForm((f) => {
+        const cur = f[field] || '';
+        if (!cur) return { ...f, [field]: next };
+        if (cur.includes(next.slice(0, Math.min(16, next.length)))) return f;
+        return { ...f, [field]: `${cur} ${next}`.trim() };
+      });
+    };
+
+    if (browserText.length >= 2) {
+      apply(browserText, languageRef.current);
+      try {
+        const mr = mediaRecorderRef.current;
+        if (mr && mr.state !== 'inactive') {
+          await new Promise((resolve) => {
+            mr.onstop = () => {
+              audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+              audioStreamRef.current = null;
+              resolve();
+            };
+            try { mr.stop(); } catch (_) { resolve(); }
+          });
+        }
+      } catch (_) {}
+      mediaRecorderRef.current = null;
+      return;
+    }
+
+    if (!mediaRecorderRef.current) return;
+    setTranscribing(true);
+    await new Promise((resolve) => {
+      const mr = mediaRecorderRef.current;
+      if (!mr || mr.state === 'inactive') {
+        setTranscribing(false);
+        resolve();
+        return;
+      }
+      mr.onstop = async () => {
+        audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
+        try {
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const res = await transcribeSmart({
+            blob,
+            browserText: '',
+            languageCode: languageRef.current,
+          });
+          if (res.transcript) apply(res.transcript, res.language_code);
+          else toast.error("Couldn't transcribe — try typing.");
+        } catch (_) {
+          toast.error("Couldn't transcribe — try typing.");
+        } finally {
+          setTranscribing(false);
+          resolve();
+        }
+      };
+      try { mr.stop(); } catch (_) {
+        setTranscribing(false);
+        resolve();
+      }
+    });
+    mediaRecorderRef.current = null;
+  };
+
+  const toggleMic = (target) => {
+    if (listening) finishListening();
+    else startListening(target || 'description');
+  };
 
   const counts = useMemo(() => {
     const c = { all: tickets.length, Open: 0, 'In Progress': 0, Resolved: 0, Closed: 0 };
@@ -176,8 +345,60 @@ export default function MyTickets() {
                 </div>
               </div>
               <form onSubmit={submit} className="space-y-4">
-                <Input label="Title" value={form.title} onChange={set('title')} placeholder="e.g. Coolant leak on spindle" required />
-                <Textarea label="Description" rows={5} value={form.description} onChange={set('description')} placeholder="What's happening, and since when?" required />
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-xs font-semibold text-muted uppercase tracking-wide">Title</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleMic('title')}
+                      disabled={transcribing}
+                      className={'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ' + (
+                        listening && micTarget === 'title'
+                          ? 'bg-danger text-white border-danger'
+                          : 'bg-surface-2 text-text border-line hover:border-amber'
+                      )}
+                      title="Speak title"
+                    >
+                      {transcribing && micTarget === 'title' ? <Loader2 size={12} className="animate-spin" /> : listening && micTarget === 'title' ? <Square size={12} /> : <Mic size={12} />}
+                      {listening && micTarget === 'title' ? 'Stop' : 'Speak'}
+                    </button>
+                  </div>
+                  <Input value={form.title} onChange={set('title')} placeholder="e.g. Coolant leak on spindle" required />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-xs font-semibold text-muted uppercase tracking-wide">Description</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleMic('description')}
+                      disabled={transcribing}
+                      className={'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ' + (
+                        listening && micTarget === 'description'
+                          ? 'bg-danger text-white border-danger'
+                          : 'bg-surface-2 text-text border-line hover:border-amber'
+                      )}
+                      title="Speak description"
+                    >
+                      {transcribing && micTarget === 'description' ? <Loader2 size={12} className="animate-spin" /> : listening && micTarget === 'description' ? <Square size={12} /> : <Mic size={12} />}
+                      {listening && micTarget === 'description' ? 'Stop' : 'Speak'}
+                    </button>
+                  </div>
+                  <Textarea rows={5} value={form.description} onChange={set('description')} placeholder="What's happening, and since when? Or tap Speak." required />
+                  {(listening || liveCaption || transcribing) && (
+                    <div className="mt-2 px-3 py-2 rounded-lg bg-surface-2 border border-line text-sm">
+                      {transcribing ? (
+                        <span className="text-muted flex items-center gap-2">
+                          <Loader2 size={14} className="animate-spin" /> Finishing transcript…
+                        </span>
+                      ) : listening ? (
+                        <span>
+                          <span className="text-danger font-semibold text-xs uppercase tracking-wide mr-2">Live</span>
+                          {liveCaption || <span className="text-muted">Listening…</span>}
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <Select label="Machine (optional)" value={form.machine_id} onChange={set('machine_id')}>
                     <option value="">— None —</option>

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { api, mediaUrl, ApiError } from '../../lib/api';
 import { PageHeader, Select, Card, Button, EmptyState, Badge, Textarea, FullPageLoader } from '../../components/ui';
+import SpeakButton from '../../components/SpeakButton';
 import { useToast } from '../../components/Toast';
 
 function formatWhen(iso) {
@@ -356,7 +357,10 @@ function TipsTab({ machineId }) {
                     </div>
                   )}
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!!(e.text || '').trim() && (
+                      <SpeakButton text={e.text} language_code={e.language_code || 'en-IN'} label="Listen" />
+                    )}
                     {(st === 'pending' || st === 'rejected') && (
                       <Button size="sm" icon={Check} onClick={() => approve(e.id)} loading={busyId === e.id}>
                         {st === 'rejected' ? 'Re-approve' : 'Approve'}
@@ -666,9 +670,18 @@ function InterviewsTab({ machineId }) {
                                           {t.answer_text || <span className="text-muted italic">No answer recorded</span>}
                                         </p>
                                       </div>
-                                      {t.answer_audio_url && (
-                                        <audio controls src={mediaUrl(t.answer_audio_url)} className="w-full h-9 mt-1" />
-                                      )}
+                                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                                        {t.answer_audio_url && (
+                                          <audio controls src={mediaUrl(t.answer_audio_url)} className="h-9 max-w-full flex-1 min-w-[200px]" />
+                                        )}
+                                        {(t.answer_text || t.question_text) && (
+                                          <SpeakButton
+                                            text={t.answer_text || t.question_text}
+                                            language_code={t.language_code || 'en-IN'}
+                                            label="Listen"
+                                          />
+                                        )}
+                                      </div>
                                       {t.knowledge_entry_id && t.knowledge_status === 'pending' && (
                                         <div className="flex flex-wrap gap-2 pt-2">
                                           <Button size="sm" icon={Check} onClick={async () => {

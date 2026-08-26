@@ -6,6 +6,7 @@ import {
   ShieldCheck, ArrowRight, Pencil, MessageCircle, FileCheck,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
+import { transcribeSmart, defaultLanguage } from '../../lib/voice';
 import {
   FullPageLoader, EmptyState, Badge, Card,
   Select, Textarea, Button, ProgressBar,
@@ -40,6 +41,7 @@ export default function MyTips() {
   const [machines, setMachines] = useState([]);
   const [machineId, setMachineId] = useState('');
   const [text, setText] = useState('');
+  const browserFinalRef = useRef('');
   const [languageCode, setLanguageCode] = useState('en-IN');
   const [round, setRound] = useState(1);
   const [stage, setStage] = useState('draft');
@@ -89,8 +91,25 @@ export default function MyTips() {
       })
       .catch(() => {});
     return () => {
-      stopCamera();
-      stopListening();
+      try {
+        // release mic/camera without relying on later-declared fn identity
+        if (recognitionRef.current) {
+          try { recognitionRef.current.stop(); } catch (_) {}
+          recognitionRef.current = null;
+        }
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          try { mediaRecorderRef.current.stop(); } catch (_) {}
+        }
+        mediaRecorderRef.current = null;
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach((t) => t.stop());
+          audioStreamRef.current = null;
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
+      } catch (_) {}
     };
   }, []);
 
@@ -239,65 +258,138 @@ export default function MyTips() {
   }, []);
 
   const startListening = async (target) => {
-    listenTargetRef.current = target || 'main';
-    setLiveCaption('');
-    setListening(true);
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SR) {
-      const rec = new SR();
-      recognitionRef.current = rec;
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = languageCode || 'en-IN';
-      rec.onresult = (event) => {
-        let interim = '';
-        let final = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const r = event.results[i];
-          if (r.isFinal) final += r[0].transcript;
-          else interim += r[0].transcript;
-        }
-        const tgt = listenTargetRef.current;
-        if (final) {
-          if (tgt === 'followup') {
-            setFollowupAnswer((t) => (t ? t + ' ' + final : final).trim());
-          } else {
-            setText((t) => (t ? t + ' ' + final : final).trim());
-          }
-          setLiveCaption(interim);
-        } else setLiveCaption(interim);
-      };
-      rec.onerror = () => {};
-      try { rec.start(); } catch (_) {}
-    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
-      audioChunksRef.current = [];
-      const mr = new MediaRecorder(stream);
-      mediaRecorderRef.current = mr;
-      mr.ondataavailable = (e) => { if (e.data && e.data.size) audioChunksRef.current.push(e.data); };
-      mr.start();
-    } catch (_) {
-      if (!SR) {
-        toast.error('Microphone access denied.');
-        setListening(false);
+      listenTargetRef.current = target || 'main';
+      setLiveCaption('');
+      if (browserFinalRef) browserFinalRef.current = '';
+      setListening(true);
+
+      const lang = languageCode || (typeof defaultLanguage === 'function' ? defaultLanguage() : 'en-IN');
+      const SR = typeof window !== 'undefined'
+        ? (window.SpeechRecognition || window.webkitSpeechRecognition)
+        : null;
+
+      if (SR) {
+        try {
+          const rec = new SR();
+          recognitionRef.current = rec;
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = lang;
+          rec.onresult = (event) => {
+            try {
+              let interim = '';
+              let final = '';
+              for (let i = event.resultIndex; i < event.results.length; i++) {
+                const r = event.results[i];
+                if (r.isFinal) final += r[0].transcript;
+                else interim += r[0].transcript;
+              }
+              const tgt = listenTargetRef.current;
+              if (final) {
+                if (browserFinalRef) {
+                  browserFinalRef.current = `${browserFinalRef.current || ''} ${final}`.trim();
+                }
+                if (tgt === 'followup') {
+                  setFollowupAnswer((t) => (t ? `${t} ${final}` : final).trim());
+                } else {
+                  setText((t) => (t ? `${t} ${final}` : final).trim());
+                }
+                setLiveCaption(interim);
+              } else {
+                setLiveCaption(interim);
+              }
+            } catch (_) {}
+          };
+          rec.onerror = () => {};
+          try { rec.start(); } catch (_) {}
+        } catch (_) {
+          /* browser STT unavailable — Sarvam fallback on stop still works */
+        }
       }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
+        audioChunksRef.current = [];
+        const mr = new MediaRecorder(stream);
+        mediaRecorderRef.current = mr;
+        mr.ondataavailable = (e) => {
+          if (e.data && e.data.size) audioChunksRef.current.push(e.data);
+        };
+        mr.start();
+      } catch (_) {
+        if (!SR) {
+          toast.error('Microphone access denied.');
+          setListening(false);
+        }
+      }
+    } catch (err) {
+      console.error('startListening failed', err);
+      setListening(false);
+      toast.error('Could not start microphone. Try typing instead.');
     }
   };
 
   const finishListening = async () => {
+    try {
     const tgt = listenTargetRef.current;
     const had = !!mediaRecorderRef.current;
     setListening(false);
     setLiveCaption('');
     try { recognitionRef.current && recognitionRef.current.stop(); } catch (_) {}
     recognitionRef.current = null;
+    const browserText = ((browserFinalRef && browserFinalRef.current) || '').trim();
+    if (browserFinalRef) browserFinalRef.current = '';
+
+    const apply = (next, lang) => {
+      if (!next) return;
+      if (tgt === 'followup') {
+        setFollowupAnswer((t) => {
+          if (!t) return next;
+          if (t.includes(next.slice(0, Math.min(16, next.length)))) return t;
+          return (t + ' ' + next).trim();
+        });
+      } else {
+        setText((t) => {
+          if (!t) return next;
+          if (t.includes(next.slice(0, Math.min(16, next.length)))) return t;
+          return (t + ' ' + next).trim();
+        });
+      }
+      if (lang) setLanguageCode(lang);
+    };
+
+    // PRIMARY: browser STT
+    if (browserText.length >= 2) {
+      apply(browserText, languageCode || defaultLanguage());
+      if (had) {
+        try {
+          const mr = mediaRecorderRef.current;
+          if (mr && mr.state !== 'inactive') {
+            await new Promise((resolve) => {
+              mr.onstop = () => {
+                if (audioStreamRef.current) {
+                  audioStreamRef.current.getTracks().forEach((t) => t.stop());
+                  audioStreamRef.current = null;
+                }
+                resolve();
+              };
+              try { mr.stop(); } catch (_) { resolve(); }
+            });
+          }
+        } catch (_) {}
+        mediaRecorderRef.current = null;
+      }
+      return;
+    }
+
+    // FALLBACK: Sarvam
     if (!had) return;
     setTranscribing(true);
     await new Promise((resolve) => {
       const mr = mediaRecorderRef.current;
-      if (!mr || mr.state === 'inactive') { resolve(); return; }
+      if (!mr || mr.state === 'inactive') { setTranscribing(false); resolve(); return; }
       mr.onstop = async () => {
         if (audioStreamRef.current) {
           audioStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -305,26 +397,13 @@ export default function MyTips() {
         }
         try {
           const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          if (blob.size > 500) {
-            const res = await api.transcribe(blob);
-            if (res && res.transcript) {
-              const next = res.transcript.trim();
-              if (tgt === 'followup') {
-                setFollowupAnswer((t) => {
-                  if (!t) return next;
-                  if (t.includes(next.slice(0, Math.min(16, next.length)))) return t;
-                  return (t + ' ' + next).trim();
-                });
-              } else {
-                setText((t) => {
-                  if (!t) return next;
-                  if (t.includes(next.slice(0, Math.min(16, next.length)))) return t;
-                  return (t + ' ' + next).trim();
-                });
-              }
-              if (res.language_code) setLanguageCode(res.language_code);
-            }
-          }
+          const res = await transcribeSmart({
+            blob,
+            browserText: '',
+            languageCode: languageCode || defaultLanguage(),
+          });
+          if (res.transcript) apply(res.transcript, res.language_code);
+          else toast.error("Couldn't transcribe — try typing.");
         } catch (_) {
           toast.error("Couldn't transcribe — try typing.");
         } finally {
@@ -332,9 +411,15 @@ export default function MyTips() {
           resolve();
         }
       };
-      try { mr.stop(); } catch (_) { resolve(); }
+      try { mr.stop(); } catch (_) { setTranscribing(false); resolve(); }
     });
     mediaRecorderRef.current = null;
+    } catch (err) {
+      console.error('finishListening failed', err);
+      setListening(false);
+      setTranscribing(false);
+      toast.error("Couldn't finish recording — try typing.");
+    }
   };
 
   const toggleMic = (target) => {
@@ -850,40 +935,8 @@ export default function MyTips() {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
-  );
-}
 
-function MicBtn({ listening, transcribing, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={transcribing}
-      className={'shrink-0 w-14 h-14 rounded-full flex items-center justify-center transition-all ' + (
-        listening ? 'bg-danger text-white shadow-lg shadow-danger/25' : 'bg-signal text-white shadow-md shadow-signal/20'
-      ) + ' disabled:opacity-60'}
-    >
-      {transcribing ? <Loader2 size={22} className="animate-spin" /> : listening ? <Square size={18} /> : <Mic size={22} />}
-    </button>
-  );
-}
-
-function LiveLine({ listening, liveCaption, transcribing }) {
-  return (
-    <div className="mt-2 px-3 py-2.5 rounded-lg bg-surface-2 border-2 border-line text-sm">
-      {transcribing ? (
-        <span className="text-muted flex items-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Finishing transcript…
-        </span>
-      ) : listening ? (
-        <span>
-          <span className="text-danger font-semibold text-xs uppercase tracking-wide mr-2">Live</span>
-          {liveCaption || <span className="text-muted">Listening…</span>}
-        </span>
-      ) : null}
-
-      {/* Full-size image viewer */}
+      {/* Full-size image viewer — must stay in MyTips (has lightboxSrc state) */}
       <AnimatePresence>
         {lightboxSrc && (
           <motion.div
@@ -916,7 +969,38 @@ function LiveLine({ listening, liveCaption, transcribing }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
 
+function MicBtn({ listening, transcribing, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={transcribing}
+      className={'shrink-0 w-14 h-14 rounded-full flex items-center justify-center transition-all ' + (
+        listening ? 'bg-danger text-white shadow-lg shadow-danger/25' : 'bg-signal text-white shadow-md shadow-signal/20'
+      ) + ' disabled:opacity-60'}
+    >
+      {transcribing ? <Loader2 size={22} className="animate-spin" /> : listening ? <Square size={18} /> : <Mic size={22} />}
+    </button>
+  );
+}
+
+function LiveLine({ listening, liveCaption, transcribing }) {
+  return (
+    <div className="mt-2 px-3 py-2.5 rounded-lg bg-surface-2 border-2 border-line text-sm">
+      {transcribing ? (
+        <span className="text-muted flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Finishing transcript…
+        </span>
+      ) : listening ? (
+        <span>
+          <span className="text-danger font-semibold text-xs uppercase tracking-wide mr-2">Live</span>
+          {liveCaption || <span className="text-muted">Listening…</span>}
+        </span>
+      ) : null}
     </div>
   );
 }

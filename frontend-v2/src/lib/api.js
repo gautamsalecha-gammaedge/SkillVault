@@ -126,10 +126,13 @@ function submitInterviewAnswerXhr(session_id, answer_text, language_code, audioB
 }
 
 
-function askWithMediaXhr(question, machine_id, imageFile, onProgress) {
+function askWithMediaXhr(question, machine_id, imageFile, onProgress, history = null) {
   const form = new FormData();
   form.append('question', question || '');
   form.append('machine_id', machine_id);
+  if (history && history.length) {
+    form.append('history', JSON.stringify(history));
+  }
   if (imageFile) form.append('image', imageFile);
   return xhr('/ask/with-media', form, { authKind: 'worker', onProgress });
 }
@@ -188,9 +191,14 @@ export const api = {
   analytics: () => apiFetch('/admin/analytics', { auth: 'admin' }),
 
   /* ---------------- Ask / Knowledge / Voice ---------------- */
-  ask: (question, machine_id, imageFile = null, onProgress = null) => {
-    if (imageFile) return askWithMediaXhr(question, machine_id, imageFile, onProgress);
-    return apiFetch('/ask', { method: 'POST', auth: 'worker', body: { question, machine_id } });
+  ask: (question, machine_id, imageFile = null, onProgress = null, history = null) => {
+    const hist = Array.isArray(history) && history.length ? history : null;
+    if (imageFile) return askWithMediaXhr(question, machine_id, imageFile, onProgress, hist);
+    return apiFetch('/ask', {
+      method: 'POST',
+      auth: 'worker',
+      body: { question, machine_id, ...(hist ? { history: hist } : {}) },
+    });
   },
   checkKnowledge: (text, machine_id, round, language_code) =>
     apiFetch('/Knowledge/add-knowledge/check', { method: 'POST', auth: 'worker', body: { text, machine_id, round, language_code } }),

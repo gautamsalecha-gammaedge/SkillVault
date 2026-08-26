@@ -6,6 +6,7 @@ import {
   Settings2, CheckCircle2, Play, Video, VideoOff,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
+import { speakSmart, transcribeSmart, defaultLanguage } from '../../lib/voice';
 import { Select, Button, Card, ProgressBar, FullPageLoader } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 
@@ -63,7 +64,9 @@ export default function Interview() {
   const audioStreamRef = useRef(null);
   const audioElRef = useRef(null);
   const objectUrlRef = useRef(null);
-  const languageRef = useRef('en-IN');
+  const languageRef = useRef(defaultLanguage());
+  const browserFinalRef = useRef('');
+  const speakJobRef = useRef(null);
   const videoRef = useRef(null);
   const camStreamRef = useRef(null);
   const captionEndRef = useRef(null);
@@ -129,8 +132,10 @@ export default function Interview() {
     }
   };
 
-  /* ---------- TTS (api.speak returns { blob }) ---------- */
+  /* ---------- TTS: browser primary → Sarvam fallback ---------- */
   const stopAiAudio = () => {
+    try { speakJobRef.current?.stop?.(); } catch (_) {}
+    speakJobRef.current = null;
     if (audioElRef.current) {
       try {
         audioElRef.current.onended = null;
@@ -144,6 +149,7 @@ export default function Interview() {
       try { URL.revokeObjectURL(objectUrlRef.current); } catch (_) {}
       objectUrlRef.current = null;
     }
+    try { window.speechSynthesis?.cancel(); } catch (_) {}
     setAiSpeaking(false);
     setAiLoading(false);
   };
@@ -153,26 +159,17 @@ export default function Interview() {
     stopAiAudio();
     setAiLoading(true);
     try {
-      const result = await api.speak(String(text).trim(), lang || languageRef.current || 'en-IN');
-      const blob = result?.blob || result;
-      if (!blob || !(blob instanceof Blob) || blob.size < 10) throw new Error('Empty audio');
-      const url = URL.createObjectURL(blob);
-      objectUrlRef.current = url;
-      const audio = new Audio(url);
-      audioElRef.current = audio;
-      audio.onended = () => { setAiSpeaking(false); setAiLoading(false); };
-      audio.onerror = () => {
-        setAiSpeaking(false);
-        setAiLoading(false);
-        toast.error('Could not play audio. Tap Replay.');
-      };
+      const job = speakSmart(String(text).trim(), lang || languageRef.current || defaultLanguage());
+      speakJobRef.current = job;
       setAiLoading(false);
       setAiSpeaking(true);
-      await audio.play();
+      await job;
     } catch (_) {
+      toast.error('Audio failed. You can still read the question.');
+    } finally {
       setAiSpeaking(false);
       setAiLoading(false);
-      toast.error('Audio failed. You can still read the question.');
+      speakJobRef.current = null;
     }
   }, [toast]);
 
@@ -195,7 +192,8 @@ export default function Interview() {
     if (aiSpeaking || aiLoading) stopAiAudio();
     setLiveCaption('');
     setListening(true);
-    const lang = languageRef.current || 'en-IN';
+    browserFinalRef.current = '';
+    const lang = languageRef.current || defaultLanguage();
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SR) {
       const rec = new SR();
@@ -212,6 +210,7 @@ export default function Interview() {
           else interim += r[0].transcript;
         }
         if (final) {
+          browserFinalRef.current = `${browserFinalRef.current} ${final}`.trim();
           setAnswer((t) => (t ? `${t} ${final}` : final).trim());
           setLiveCaption(interim);
         } else setLiveCaption(interim);
@@ -241,11 +240,52 @@ export default function Interview() {
     setLiveCaption('');
     try { recognitionRef.current && recognitionRef.current.stop(); } catch (_) {}
     recognitionRef.current = null;
+    const browserText = browserFinalRef.current;
+    browserFinalRef.current = '';
+
+    const applyTranscript = (next, lang) => {
+      if (!next) return;
+      setAnswer((t) => {
+        if (!t) return next;
+        if (t.includes(next.slice(0, Math.min(16, next.length)))) return t;
+        return `${t} ${next}`.trim();
+      });
+      if (lang) languageRef.current = lang;
+    };
+
+    // Primary: browser already produced text
+    if ((browserText || '').trim().length >= 2) {
+      applyTranscript(browserText.trim(), languageRef.current);
+      if (had) {
+        try {
+          const mr = mediaRecorderRef.current;
+          if (mr && mr.state !== 'inactive') {
+            await new Promise((resolve) => {
+              mr.onstop = () => {
+                if (audioStreamRef.current) {
+                  audioStreamRef.current.getTracks().forEach((t) => t.stop());
+                  audioStreamRef.current = null;
+                }
+                try {
+                  const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                  setAudioBlob(blob);
+                } catch (_) {}
+                resolve();
+              };
+              try { mr.stop(); } catch (_) { resolve(); }
+            });
+          }
+        } catch (_) {}
+        mediaRecorderRef.current = null;
+      }
+      return;
+    }
+
     if (!had) return;
     setTranscribing(true);
     await new Promise((resolve) => {
       const mr = mediaRecorderRef.current;
-      if (!mr || mr.state === 'inactive') { resolve(); return; }
+      if (!mr || mr.state === 'inactive') { setTranscribing(false); resolve(); return; }
       mr.onstop = async () => {
         if (audioStreamRef.current) {
           audioStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -254,18 +294,13 @@ export default function Interview() {
         try {
           const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           setAudioBlob(blob);
-          if (blob.size > 500) {
-            const res = await api.transcribe(blob);
-            if (res?.transcript) {
-              const next = res.transcript.trim();
-              setAnswer((t) => {
-                if (!t) return next;
-                if (t.includes(next.slice(0, Math.min(16, next.length)))) return t;
-                return `${t} ${next}`.trim();
-              });
-              if (res.language_code) languageRef.current = res.language_code;
-            }
-          }
+          const res = await transcribeSmart({
+            blob,
+            browserText: '',
+            languageCode: languageRef.current,
+          });
+          if (res.transcript) applyTranscript(res.transcript, res.language_code);
+          else toast.error("Couldn't transcribe — you can still type.");
         } catch (_) {
           toast.error("Couldn't transcribe — you can still type.");
         } finally {
@@ -273,7 +308,7 @@ export default function Interview() {
           resolve();
         }
       };
-      try { mr.stop(); } catch (_) { resolve(); }
+      try { mr.stop(); } catch (_) { setTranscribing(false); resolve(); }
     });
     mediaRecorderRef.current = null;
   };
@@ -285,20 +320,47 @@ export default function Interview() {
 
   /* ---------- Session ---------- */
   const runSetupThenStart = async (fresh) => {
+    if (!machineId) {
+      toast.error('Select a machine first.');
+      return;
+    }
     setPhase('setup');
     setSetupStep(0);
     const stepTimers = SETUP_STEPS.map((_, i) =>
       setTimeout(() => setSetupStep(i), i * 650)
     );
     try {
+      // 1) Microphone must work (answers are voice-first)
+      setSetupStep(0);
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-        s.getTracks().forEach((t) => t.stop());
-      } catch (_) {}
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mic.getTracks().forEach((t) => t.stop());
+      } catch (micErr) {
+        stepTimers.forEach(clearTimeout);
+        toast.error('Microphone is required for the interview. Allow mic access and try again.');
+        setPhase('lobby');
+        return;
+      }
 
-      // Start camera during setup
-      await startCamera();
+      // 2) Camera preview must start (video panel is part of the room UI)
+      setSetupStep(1);
+      setCameraError(false);
+      try {
+        await startCamera();
+        // startCamera sets cameraError on failure but does not throw — verify stream
+        if (!camStreamRef.current) {
+          throw new Error('camera failed');
+        }
+      } catch (_) {
+        stepTimers.forEach(clearTimeout);
+        setCameraError(true);
+        toast.error('Camera is required to enter the interview room. Allow camera access and try again.');
+        setPhase('lobby');
+        stopCamera();
+        return;
+      }
 
+      setSetupStep(2);
       const res = await api.startInterview(machineId, languageRef.current || 'en-IN', fresh);
       setSetupStep(SETUP_STEPS.length - 1);
       await new Promise((r) => setTimeout(r, 400));

@@ -5,6 +5,7 @@ import {
   Volume2, BookOpen, User, Bot, Image as ImageIcon, X, Paperclip, Camera, Pause, Play,
 } from 'lucide-react';
 import { api, mediaUrl, ApiError } from '../../lib/api';
+import { getWorkerId, clearAskChatStorage } from '../../lib/auth';
 import { Select, EmptyState, Button, Card } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 
@@ -17,9 +18,14 @@ export default function Ask() {
   const [machines, setMachines] = useState([]);
   const [machineId, setMachineId] = useState('');
   const [question, setQuestion] = useState('');
+  // Per-worker + per-machine threads for this browser tab session only
+  const workerId = getWorkerId() || '';
   const [thread, setThread] = useState([]);
   const [asking, setAsking] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(true);
+  const threadsByMachineRef = useRef({});
+  const activeMachineRef = useRef('');
+  const ownerRef = useRef(workerId);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [lightboxSrc, setLightboxSrc] = useState(null);
@@ -40,19 +46,125 @@ export default function Ask() {
   const audioChunksRef = useRef([]);
   const audioStreamRef = useRef(null);
   const audioElRef = useRef(null);
-  const languageRef = useRef('en-IN');
+  const languageRef = useRef(
+    (typeof navigator !== 'undefined' && navigator.language) || 'en-IN'
+  );
+  // Browser STT final text for this recording (primary); Sarvam is fallback only
+  const browserFinalRef = useRef('');
+  const browserGotResultRef = useRef(false);
+  // Bumps on stop so in-flight speakText does not start Sarvam after cancel
+  const speakGenRef = useRef(0);
 
+  // Load machines + restore THIS worker's per-machine threads (never another worker's)
   useEffect(() => {
+    const wid = getWorkerId() || '';
+    // If account changed in this tab, wipe any leftover ask cache
+    try {
+      const owner = sessionStorage.getItem('sv_ask_owner');
+      if (owner && owner !== wid) {
+        clearAskChatStorage();
+      }
+      if (wid) sessionStorage.setItem('sv_ask_owner', wid);
+    } catch (_) {}
+
+    ownerRef.current = wid;
+    threadsByMachineRef.current = {};
+    try {
+      const raw = sessionStorage.getItem(`sv_ask_map_${wid}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') threadsByMachineRef.current = parsed;
+      }
+    } catch (_) {}
+
     api.myMachines()
       .then((r) => {
-        setMachines(r.machine_ids || []);
-        if (r.machine_ids?.length) setMachineId(r.machine_ids[0]);
+        const ids = r.machine_ids || [];
+        setMachines(ids);
+        const first = ids[0] || '';
+        setMachineId(first);
+        activeMachineRef.current = first;
+        setThread(Array.isArray(threadsByMachineRef.current[first])
+          ? threadsByMachineRef.current[first]
+          : []);
       })
       .catch(() => {});
+  }, []);
+
+  // When machine changes: save current thread under old machine, load the other
+  useEffect(() => {
+    if (!machineId) return;
+    const prev = activeMachineRef.current;
+    if (prev && prev !== machineId) {
+      threadsByMachineRef.current[prev] = thread.slice(-40);
+    }
+    activeMachineRef.current = machineId;
+    const next = threadsByMachineRef.current[machineId];
+    setThread(Array.isArray(next) ? next : []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only switch on machineId
+  }, [machineId]);
+
+  // Persist current worker map whenever thread changes
+  useEffect(() => {
+    const wid = getWorkerId() || ownerRef.current;
+    if (!wid || !machineId) return;
+    threadsByMachineRef.current[machineId] = thread.slice(-40);
+    try {
+      sessionStorage.setItem(`sv_ask_map_${wid}`, JSON.stringify(threadsByMachineRef.current));
+      sessionStorage.setItem('sv_ask_owner', wid);
+    } catch (_) {}
+  }, [thread, machineId]);
+
+  // HARD stop all audio / mic / camera when leaving Ask (fixes ghost TTS after navigate)
+  useEffect(() => {
+    const hardStop = () => {
+      try { speakGenRef.current += 1; } catch (_) {}
+      try { window.speechSynthesis?.cancel(); } catch (_) {}
+      try {
+        if (audioElRef.current) {
+          if (!audioElRef.current._browser) {
+            try { audioElRef.current.pause?.(); } catch (_) {}
+            try { audioElRef.current.src = ''; } catch (_) {}
+          }
+          audioElRef.current = null;
+        }
+      } catch (_) {}
+      try {
+        if (recognitionRef.current) {
+          recognitionRef.current.stop();
+          recognitionRef.current = null;
+        }
+      } catch (_) {}
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+        mediaRecorderRef.current = null;
+      } catch (_) {}
+      try {
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach((t) => t.stop());
+          audioStreamRef.current = null;
+        }
+      } catch (_) {}
+      try {
+        if (cameraStreamRef.current) {
+          cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+          cameraStreamRef.current = null;
+        }
+      } catch (_) {}
+      setSpeakingId(null);
+      setSpeakState('idle');
+      setListening(false);
+      setCameraOpen(false);
+    };
+    const onVis = () => { if (document.hidden) hardStop(); };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pagehide', hardStop);
     return () => {
-      stopListening();
-      stopSpeak();
-      stopCamera();
+      hardStop();
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', hardStop);
     };
   }, []);
 
@@ -61,10 +173,17 @@ export default function Ask() {
   }, [thread, asking, liveCaption]);
 
   const stopSpeak = () => {
+    // Invalidate any in-flight speakText so browser cancel does NOT fall through to Sarvam
+    speakGenRef.current += 1;
+    try { window.speechSynthesis?.cancel(); } catch (_) {}
     if (audioElRef.current) {
       try {
-        audioElRef.current.pause();
-        audioElRef.current.src = '';
+        if (audioElRef.current._browser) {
+          try { window.speechSynthesis?.cancel(); } catch (_) {}
+        } else {
+          audioElRef.current.pause();
+          audioElRef.current.src = '';
+        }
       } catch (_) {}
       audioElRef.current = null;
     }
@@ -74,52 +193,135 @@ export default function Ask() {
 
   const pauseSpeak = () => {
     const a = audioElRef.current;
-    if (a && !a.paused) {
-      a.pause();
+    if (!a) return;
+    try {
+      if (a._browser) {
+        window.speechSynthesis?.pause();
+      } else if (!a.paused) {
+        a.pause();
+      }
       setSpeakState('paused');
-    }
+    } catch (_) {}
   };
 
   const resumeSpeak = async () => {
     const a = audioElRef.current;
-    if (a && a.paused) {
-      try {
+    if (!a) return;
+    try {
+      if (a._browser) {
+        window.speechSynthesis?.resume();
+      } else if (a.paused) {
         await a.play();
-        setSpeakState('playing');
-      } catch (_) {
-        toast.error('Could not resume audio.');
       }
+      setSpeakState('playing');
+    } catch (_) {
+      toast.error('Could not resume audio.');
     }
+  };
+
+  /**
+   * TTS policy:
+   *  1. PRIMARY — browser speechSynthesis
+   *  2. FALLBACK — Sarvam /speak
+   * Stop/cancel must NOT trigger Sarvam (that was the bug).
+   */
+  const speakWithBrowser = (text) =>
+    new Promise((resolve, reject) => {
+      if (typeof window === 'undefined' || !window.speechSynthesis) {
+        reject(new Error('no speechSynthesis'));
+        return;
+      }
+      try { window.speechSynthesis.cancel(); } catch (_) {}
+      const u = new SpeechSynthesisUtterance(text);
+      const lang = languageRef.current || navigator.language || 'en-IN';
+      u.lang = lang;
+      u.onend = () => resolve({ status: 'ended' });
+      u.onerror = (e) => {
+        const err = (e && e.error) || '';
+        // User hit Stop, or another utterance replaced this one — not a real failure
+        if (err === 'interrupted' || err === 'canceled' || err === 'cancelled') {
+          resolve({ status: 'stopped' });
+          return;
+        }
+        reject(new Error(err || 'tts error'));
+      };
+      audioElRef.current = {
+        pause: () => { try { window.speechSynthesis.pause(); } catch (_) {} },
+        play: () => { try { window.speechSynthesis.resume(); } catch (_) {} },
+        get paused() {
+          try { return window.speechSynthesis.paused; } catch (_) { return false; }
+        },
+        src: '',
+        _browser: true,
+        _utterance: u,
+      };
+      window.speechSynthesis.speak(u);
+    });
+
+  const speakWithSarvam = async (text, gen) => {
+    const result = await api.speak(text.trim(), languageRef.current || 'en-IN');
+    // User may have stopped while waiting for Sarvam response
+    if (gen !== speakGenRef.current) return { status: 'stopped' };
+    const blob = result?.blob || result;
+    if (!blob || !(blob instanceof Blob)) throw new Error('no audio');
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audioElRef.current = audio;
+    return new Promise((resolve, reject) => {
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        resolve({ status: 'ended' });
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('audio error'));
+      };
+      audio.play().then(() => {
+        if (gen !== speakGenRef.current) {
+          try {
+            audio.pause();
+            audio.src = '';
+          } catch (_) {}
+          URL.revokeObjectURL(url);
+          resolve({ status: 'stopped' });
+        }
+      }).catch(reject);
+    });
   };
 
   const speakText = async (text, id) => {
     if (!text?.trim()) return;
-    stopSpeak();
+    stopSpeak(); // bumps gen + clears previous audio
+    const gen = speakGenRef.current;
     setSpeakingId(id);
     setSpeakState('playing');
     try {
-      const result = await api.speak(text.trim(), languageRef.current || 'en-IN');
-      const blob = result?.blob || result;
-      if (!blob || !(blob instanceof Blob)) throw new Error('no audio');
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioElRef.current = audio;
-      audio.onended = () => {
+      let outcome;
+      try {
+        outcome = await speakWithBrowser(text.trim());
+      } catch (_) {
+        // Real browser failure only — not user stop
+        if (gen !== speakGenRef.current) {
+          setSpeakingId(null);
+          setSpeakState('idle');
+          return;
+        }
+        outcome = await speakWithSarvam(text.trim(), gen);
+      }
+      // If user stopped during browser play, do NOT start Sarvam
+      if (!outcome || outcome.status === 'stopped' || gen !== speakGenRef.current) {
         setSpeakingId(null);
         setSpeakState('idle');
-        URL.revokeObjectURL(url);
-      };
-      audio.onerror = () => {
-        setSpeakingId(null);
-        setSpeakState('idle');
-        URL.revokeObjectURL(url);
-      };
-      await audio.play();
-      setSpeakState('playing');
-    } catch (_) {
+        return;
+      }
       setSpeakingId(null);
       setSpeakState('idle');
-      toast.error('Could not play audio.');
+    } catch (_) {
+      if (gen === speakGenRef.current) {
+        setSpeakingId(null);
+        setSpeakState('idle');
+        toast.error('Could not play audio.');
+      }
     }
   };
 
@@ -137,10 +339,18 @@ export default function Ask() {
     setListening(false);
   }, []);
 
+  /**
+   * Voice STT policy (foreign clients + Indian languages):
+   *  1. PRIMARY — browser Web Speech API (Chrome/Edge etc.) — supports FR, DE, ES, …
+   *  2. FALLBACK — Sarvam STT on the recorded blob (strong on Indian languages)
+   * Browser is preferred because Sarvam does not cover many non-Indian languages.
+   */
   const startListening = async () => {
     setLiveCaption('');
     setListening(true);
-    const lang = languageRef.current || 'en-IN';
+    browserFinalRef.current = '';
+    browserGotResultRef.current = false;
+    const lang = languageRef.current || navigator.language || 'en-IN';
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SR) {
       const rec = new SR();
@@ -157,6 +367,8 @@ export default function Ask() {
           else interim += r[0].transcript;
         }
         if (final) {
+          browserGotResultRef.current = true;
+          browserFinalRef.current = `${browserFinalRef.current} ${final}`.trim();
           setQuestion((t) => (t ? `${t} ${final}` : final).trim());
           setLiveCaption(interim);
         } else {
@@ -166,6 +378,7 @@ export default function Ask() {
       rec.onerror = () => {};
       try { rec.start(); } catch (_) {}
     }
+    // Always record a blob so Sarvam can run if browser STT is weak / missing
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioStreamRef.current = stream;
@@ -188,11 +401,55 @@ export default function Ask() {
     setLiveCaption('');
     try { recognitionRef.current && recognitionRef.current.stop(); } catch (_) {}
     recognitionRef.current = null;
-    if (!had) return;
+
+    const browserText = (browserFinalRef.current || '').trim();
+    // Primary path: browser already produced usable final text
+    if (browserText.length >= 2) {
+      // Question field was updated live; ensure final is present
+      setQuestion((t) => {
+        const cur = (t || '').trim();
+        if (!cur) return browserText;
+        if (cur.includes(browserText.slice(0, Math.min(16, browserText.length)))) return cur;
+        return `${cur} ${browserText}`.trim();
+      });
+      // Still stop recorder to release mic; skip Sarvam
+      if (had) {
+        try {
+          const mr = mediaRecorderRef.current;
+          if (mr && mr.state !== 'inactive') {
+            await new Promise((resolve) => {
+              mr.onstop = () => {
+                if (audioStreamRef.current) {
+                  audioStreamRef.current.getTracks().forEach((t) => t.stop());
+                  audioStreamRef.current = null;
+                }
+                resolve();
+              };
+              try { mr.stop(); } catch (_) { resolve(); }
+            });
+          }
+        } catch (_) {}
+        mediaRecorderRef.current = null;
+      }
+      browserFinalRef.current = '';
+      return;
+    }
+
+    // Fallback: no solid browser transcript → Sarvam STT
+    if (!had) {
+      if (!browserGotResultRef.current) {
+        toast.error("Couldn't hear that — try again or type.");
+      }
+      return;
+    }
     setTranscribing(true);
     await new Promise((resolve) => {
       const mr = mediaRecorderRef.current;
-      if (!mr || mr.state === 'inactive') { resolve(); return; }
+      if (!mr || mr.state === 'inactive') {
+        setTranscribing(false);
+        resolve();
+        return;
+      }
       mr.onstop = async () => {
         if (audioStreamRef.current) {
           audioStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -210,7 +467,11 @@ export default function Ask() {
                 return `${t} ${next}`.trim();
               });
               if (res.language_code) languageRef.current = res.language_code;
+            } else {
+              toast.error("Couldn't transcribe — try typing.");
             }
+          } else {
+            toast.error("Couldn't hear that — try again or type.");
           }
         } catch (_) {
           toast.error("Couldn't transcribe — try typing.");
@@ -219,9 +480,13 @@ export default function Ask() {
           resolve();
         }
       };
-      try { mr.stop(); } catch (_) { resolve(); }
+      try { mr.stop(); } catch (_) {
+        setTranscribing(false);
+        resolve();
+      }
     });
     mediaRecorderRef.current = null;
+    browserFinalRef.current = '';
   };
 
   const toggleMic = () => {
@@ -237,7 +502,7 @@ export default function Ask() {
     }
     setImageFile(null);
     setImagePreview(null);
-  };;
+  };
 
   const onImagePick = (e) => {
     const f = e.target.files?.[0];
@@ -332,7 +597,12 @@ export default function Ask() {
     clearImage(false); // clear composer only — do not revoke message preview URL
     setAsking(true);
     try {
-      const res = await api.ask(q, machineId, attached);
+      // Context window: last turns before this question (max 8 = ~4 Q&A pairs)
+      const history = thread
+        .filter((m) => m && (m.role === 'worker' || m.role === 'ai') && (m.text || '').trim())
+        .slice(-8)
+        .map((m) => ({ role: m.role, text: String(m.text).slice(0, 1200) }));
+      const res = await api.ask(q, machineId, attached, null, history);
       const aiId = `a-${id}`;
       const answer = res.answer || 'No answer returned.';
       setThread((t) => [
@@ -357,11 +627,19 @@ export default function Ask() {
     }
   };
 
-  const suggestions = [
-    'What does a grinding noise on cold start mean?',
-    'How do I check coolant level safely?',
-    'What should I do if the spindle overheats?',
-  ];
+  // Suggestions follow the selected machine (name in the question).
+  // Keep them general so they work for CNC, lathe, grinder, etc. — not CNC-only tips.
+  const suggestions = machineId
+    ? [
+        `What should I check before starting ${machineId}?`,
+        `What are common warning signs on ${machineId}?`,
+        `What safety steps are required on ${machineId}?`,
+      ]
+    : [
+        'What should I check before starting this machine?',
+        'What are common warning signs on this machine?',
+        'What safety steps are required before I begin?',
+      ];
 
   return (
     <div className="flex flex-col h-[calc(100vh-130px)] lg:h-[calc(100vh-88px)] max-w-3xl mx-auto w-full">
@@ -372,13 +650,34 @@ export default function Ask() {
           <h1 className="text-2xl font-semibold text-text">Ask the machine</h1>
           <p className="text-sm text-muted mt-0.5">Answers from manuals & approved tips only — never a guess.</p>
         </div>
-        {machines.length > 0 && (
-          <Select value={machineId} onChange={(e) => setMachineId(e.target.value)} className="min-w-[160px]">
-            {machines.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </Select>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {thread.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                stopSpeak();
+                setThread([]);
+                const wid = getWorkerId() || ownerRef.current;
+                if (machineId) {
+                  threadsByMachineRef.current[machineId] = [];
+                }
+                try {
+                  if (wid) sessionStorage.setItem(`sv_ask_map_${wid}`, JSON.stringify(threadsByMachineRef.current));
+                } catch (_) {}
+              }}
+              className="px-3 py-2 rounded-xl text-sm font-semibold border-2 border-line bg-surface-2 text-muted hover:text-text hover:border-line"
+            >
+              Clear chat
+            </button>
+          )}
+          {machines.length > 0 && (
+            <Select value={machineId} onChange={(e) => setMachineId(e.target.value)} className="min-w-[160px]">
+              {machines.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </Select>
+          )}
+        </div>
       </div>
 
       {machines.length === 0 ? (

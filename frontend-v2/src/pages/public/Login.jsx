@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, HardHat, UserCog, Mic2, ShieldCheck, Radio, MessageCircleQuestion, BookOpenCheck } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
-import { setWorkerSession, setAdminSession } from '../../lib/auth';
+import { setWorkerSession, setAdminSession, clearAskChatStorage, clearWorkerSession, clearAdminSession } from '../../lib/auth';
 import { Input, Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { Brand } from '../../components/WorkerLayout';
@@ -47,7 +47,10 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await api.workerLogin(workerId.trim(), password);
+      // Always start a clean Ask session for this login (never show another worker's chat)
+      clearWorkerSession();
       setWorkerSession(res.token, res.name, workerId.trim());
+      clearAskChatStorage();
       toast.success(`Welcome back, ${res.name}.`);
       nav('/worker');
     } catch (err) {
@@ -62,6 +65,7 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await api.adminLogin(username.trim(), adminPassword);
+      clearAdminSession();
       setAdminSession(res.token, res.name);
       toast.success('Welcome back.');
       nav('/admin');

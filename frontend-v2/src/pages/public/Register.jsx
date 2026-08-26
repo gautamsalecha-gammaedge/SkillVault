@@ -35,6 +35,7 @@ export default function Register() {
   const [form, setForm] = useState({
     name: '',
     password: '',
+    password_confirm: '',
     phone_country_code: '+91',
     phone_number: '',
     address: '',
@@ -44,11 +45,34 @@ export default function Register() {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const passwordsMatch =
+    form.password.length > 0 &&
+    form.password_confirm.length > 0 &&
+    form.password === form.password_confirm;
+  const showMismatch =
+    form.password_confirm.length > 0 && form.password !== form.password_confirm;
+
   const submit = async (e) => {
     e.preventDefault();
+    if (!form.password.trim()) {
+      toast.error('Enter a password.');
+      return;
+    }
+    if (form.password !== form.password_confirm) {
+      toast.error('Passwords do not match. Re-enter the same password.');
+      return;
+    }
     setLoading(true);
     try {
-      const res = await api.workerRegister(form);
+      // Frontend-only confirm field — do not send password_confirm to API
+      const payload = {
+        name: form.name.trim(),
+        password: form.password,
+        phone_country_code: form.phone_country_code,
+        phone_number: form.phone_number,
+        address: form.address,
+      };
+      const res = await api.workerRegister(payload);
       setResult(res);
       toast.success('Registered! Waiting on admin approval.');
     } catch (err) {
@@ -201,15 +225,53 @@ export default function Register() {
             </div>
             <form onSubmit={submit} className="space-y-5">
               <Input label="Full name" value={form.name} onChange={set('name')} required />
-              <Input label="Password" type="password" value={form.password} onChange={set('password')} required />
+              <Input
+                label="Password"
+                type="password"
+                value={form.password}
+                onChange={set('password')}
+                required
+                autoComplete="new-password"
+              />
+              <div>
+                <Input
+                  label="Re-enter password"
+                  type="password"
+                  value={form.password_confirm}
+                  onChange={set('password_confirm')}
+                  required
+                  autoComplete="new-password"
+                />
+                {showMismatch && (
+                  <p className="mt-1.5 text-sm text-danger font-medium">
+                    Passwords do not match.
+                  </p>
+                )}
+                {passwordsMatch && (
+                  <p className="mt-1.5 text-sm text-signal font-medium flex items-center gap-1.5">
+                    <CheckCircle2 size={14} /> Passwords match
+                  </p>
+                )}
+              </div>
               <div className="grid grid-cols-[100px_1fr] gap-3">
                 <Input label="Code" value={form.phone_country_code} onChange={set('phone_country_code')} />
                 <Input label="Phone (optional)" value={form.phone_number} onChange={set('phone_number')} />
               </div>
               <Input label="Address (optional)" value={form.address} onChange={set('address')} />
-              <Button type="submit" size="lg" className="w-full mt-1" loading={loading}>
+              <Button
+                type="submit"
+                size="lg"
+                className="w-full mt-1"
+                loading={loading}
+                disabled={!form.name.trim() || !form.password || !passwordsMatch}
+              >
                 Create my account
               </Button>
+              {!passwordsMatch && form.password_confirm.length > 0 && (
+                <p className="text-center text-xs text-muted">
+                  Fix the password match to submit for approval.
+                </p>
+              )}
             </form>
             <p className="text-center text-[15px] text-muted mt-6">
               Already registered?{' '}

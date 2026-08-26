@@ -6,12 +6,20 @@ Kept in one file since they're small and every router needs a subset of them.
 """
 
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
+
+
+class AskHistoryTurn(BaseModel):
+    """One prior turn in the Ask chat (worker or ai)."""
+    role: str  # "worker" | "ai" | "user" | "assistant"
+    text: str
 
 
 class AskRequest(BaseModel):
     question: str
     machine_id: str
+    # Optional recent chat turns for context window (oldest → newest, exclude current question)
+    history: Optional[List[AskHistoryTurn]] = None
 
 
 class AddKnowledgeRequest(BaseModel):
