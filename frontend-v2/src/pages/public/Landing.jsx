@@ -1,18 +1,73 @@
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, useScroll, useSpring } from 'framer-motion';
 import {
   ArrowUpRight, Mic, ShieldCheck, BrainCircuit, Ticket,
   Fingerprint, Factory, Waves, ChevronRight, Check, Sparkles,
   Users, BookOpen, MessageCircleQuestion, Mic2, HardHat, Radio,
+  ArrowUp,
 } from 'lucide-react';
+import { clearWorkerSession, clearAdminSession, clearAskChatStorage } from '../../lib/auth';
+
+const NAV_SECTIONS = [
+  { id: 'problem', label: 'The Problem' },
+  { id: 'results', label: 'Results' },
+  { id: 'how', label: 'How it Works' },
+  { id: 'features', label: 'Platform' },
+];
 
 const fadeUp = {
-  initial: { opacity: 0, y: 28 },
+  initial: { opacity: 0, y: 32 },
   whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true, margin: '-60px' },
+  viewport: { once: true, margin: '-80px' },
+  transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] },
 };
 
+/**
+ * Smooth scroll to any landing section (all 4 nav items use this same path).
+ * Accounts for sticky header height so the section title is not hidden.
+ */
+function scrollToSection(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const header = document.querySelector('[data-landing-header]');
+  const offset = header ? header.getBoundingClientRect().height + 16 : 100;
+  const targetY = Math.max(0, el.getBoundingClientRect().top + window.scrollY - offset);
+  const startY = window.scrollY;
+  const distance = targetY - startY;
+  if (Math.abs(distance) < 2) {
+    try { history.replaceState(null, '', `#${id}`); } catch (_) {}
+    return;
+  }
+  // Custom ease so all 4 links feel the same (not a hard jump)
+  const duration = Math.min(1100, Math.max(450, Math.abs(distance) * 0.45));
+  const start = performance.now();
+  const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+  let cancelled = false;
+  const cancel = () => { cancelled = true; };
+  window.addEventListener('wheel', cancel, { passive: true, once: true });
+  window.addEventListener('touchstart', cancel, { passive: true, once: true });
+
+  const step = (now) => {
+    if (cancelled) return;
+    const t = Math.min(1, (now - start) / duration);
+    window.scrollTo(0, startY + distance * ease(t));
+    if (t < 1) requestAnimationFrame(step);
+    else {
+      try { history.replaceState(null, '', `#${id}`); } catch (_) {}
+    }
+  };
+  requestAnimationFrame(step);
+}
+
 export default function Landing() {
+  // Back to landing (or opening home) = signed out — must login again with ID + password
+  useEffect(() => {
+    clearWorkerSession();
+    clearAdminSession();
+    clearAskChatStorage();
+  }, []);
+
   return (
     <div className="overflow-x-clip bg-[#f7f4ef] text-stone-900">
       <TopBar />
@@ -26,17 +81,68 @@ export default function Landing() {
       <Metrics />
       <CTA />
       <Footer />
+      <BackToTop />
     </div>
+  );
+}
+
+/* ─── Scroll progress (under sticky bar) ───────────────── */
+
+function ScrollProgress() {
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 28, mass: 0.2 });
+  return (
+    <motion.div
+      className="absolute left-0 right-0 bottom-0 h-[3px] origin-left bg-gradient-to-r from-[#0f9d8a] via-[#12b09b] to-[#d97706]"
+      style={{ scaleX }}
+    />
   );
 }
 
 /* ─── Top bar ─────────────────────────────────────────── */
 
 function TopBar() {
+  const [active, setActive] = useState('');
+  const [scrolled, setScrolled] = useState(false);
+
+  const onNavClick = useCallback((e, id) => {
+    e.preventDefault();
+    scrollToSection(id);
+  }, []);
+
+  useEffect(() => {
+    // Open with hash → smooth scroll after paint
+    const hash = (window.location.hash || '').replace('#', '');
+    if (hash && document.getElementById(hash)) {
+      requestAnimationFrame(() => scrollToSection(hash));
+    }
+
+    const onScroll = () => {
+      setScrolled(window.scrollY > 24);
+      const header = document.querySelector('[data-landing-header]');
+      const offset = (header ? header.getBoundingClientRect().height : 90) + 40;
+      let current = '';
+      for (const { id } of NAV_SECTIONS) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        if (el.getBoundingClientRect().top - offset <= 0) current = id;
+      }
+      setActive(current);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
-    <header className="sticky top-0 z-50">
+    <header
+      data-landing-header
+      className={`sticky top-0 z-50 transition-shadow duration-300 ${
+        scrolled ? 'shadow-[0_12px_32px_-16px_rgba(28,25,23,0.22)]' : ''
+      }`}
+    >
       <div
-        className="border-b border-stone-200/80 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset,0_12px_32px_-12px_rgba(28,25,23,0.16)]"
+        className="relative border-b border-stone-200/80"
         style={{
           background:
             'linear-gradient(180deg, rgba(255,252,248,0.99) 0%, rgba(250,247,242,0.96) 100%)',
@@ -44,9 +150,19 @@ function TopBar() {
           WebkitBackdropFilter: 'blur(18px)',
         }}
       >
-        {/* Taller bar — standard desktop ~72–80px for easy reading */}
         <div className="max-w-7xl mx-auto px-5 sm:px-8 h-[4.75rem] sm:h-[5.25rem] md:h-[5.75rem] flex items-center justify-between gap-5">
-          <Link to="/" className="flex items-center gap-3 shrink-0 group">
+          <Link
+            to="/"
+            onClick={(e) => {
+              if (window.location.pathname === '/' || window.location.pathname === '') {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                try { history.replaceState(null, '', ' '); history.replaceState(null, '', '/'); } catch (_) {}
+                setActive('');
+              }
+            }}
+            className="flex items-center gap-3 shrink-0 group"
+          >
             <div className="relative w-12 h-12 sm:w-[3.25rem] sm:h-[3.25rem] rounded-[13px] bg-gradient-to-br from-[#0f9d8a] to-[#0b7a6b] flex items-center justify-center shadow-[0_3px_12px_-2px_rgba(15,157,138,0.5)] group-hover:shadow-[0_5px_16px_-2px_rgba(15,157,138,0.55)] transition-shadow">
               <span className="absolute inset-[3px] rounded-[10px] border border-white/30" />
               <div className="w-3 h-3 rounded-full bg-white shadow-sm" />
@@ -62,20 +178,23 @@ function TopBar() {
           </Link>
 
           <nav className="hidden md:flex items-center gap-1 p-1.5 rounded-full border border-stone-200/90 bg-white/90 shadow-[0_1px_4px_rgba(28,25,23,0.06)]">
-            {[
-              { href: '#problem', label: 'The Problem' },
-              { href: '#results', label: 'Results' },
-              { href: '#how', label: 'How it Works' },
-              { href: '#features', label: 'Platform' },
-            ].map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className="px-5 py-2.5 rounded-full text-[15px] sm:text-base font-semibold text-stone-600 hover:text-stone-900 hover:bg-stone-100 transition-colors"
-              >
-                {item.label}
-              </a>
-            ))}
+            {NAV_SECTIONS.map((item) => {
+              const isActive = active === item.id;
+              return (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  onClick={(e) => onNavClick(e, item.id)}
+                  className={`px-5 py-2.5 rounded-full text-[15px] sm:text-base font-semibold transition-all duration-300 ${
+                    isActive
+                      ? 'bg-[#0f9d8a] text-white shadow-sm'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
+                  }`}
+                >
+                  {item.label}
+                </a>
+              );
+            })}
           </nav>
 
           <div className="flex items-center gap-2.5 sm:gap-3.5 shrink-0">
@@ -87,14 +206,40 @@ function TopBar() {
             </Link>
             <Link
               to="/register"
-              className="inline-flex items-center h-12 sm:h-[3.25rem] px-6 sm:px-7 rounded-full text-[15px] sm:text-base font-semibold text-white bg-[#0f9d8a] hover:bg-[#0d8a79] transition-all shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_8px_18px_-6px_rgba(15,157,138,0.55)]"
+              className="inline-flex items-center h-12 sm:h-[3.25rem] px-6 sm:px-7 rounded-full text-[15px] sm:text-base font-semibold text-white bg-[#0f9d8a] hover:bg-[#0d8a79] transition-all shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_8px_18px_-6px_rgba(15,157,138,0.55)] hover:-translate-y-0.5"
             >
               Join the floor
             </Link>
           </div>
         </div>
+        <ScrollProgress />
       </div>
     </header>
+  );
+}
+
+/* ─── Back to top ─────────────────────────────────────── */
+
+function BackToTop() {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShow(window.scrollY > 520);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  return (
+    <motion.button
+      type="button"
+      aria-label="Back to top"
+      initial={false}
+      animate={{ opacity: show ? 1 : 0, y: show ? 0 : 16, pointerEvents: show ? 'auto' : 'none' }}
+      transition={{ duration: 0.25 }}
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      className="fixed bottom-6 right-6 z-40 w-12 h-12 rounded-full bg-[#0f9d8a] text-white shadow-[0_10px_28px_-8px_rgba(15,157,138,0.55)] flex items-center justify-center hover:bg-[#0d8a79] hover:-translate-y-0.5 transition-colors"
+    >
+      <ArrowUp size={20} strokeWidth={2.5} />
+    </motion.button>
   );
 }
 
@@ -877,6 +1022,7 @@ function Footer() {
       <div
         className="px-6 py-14 md:py-16"
         style={{
+          color: '#fafaf9',
           background:
             'radial-gradient(ellipse 80% 60% at 10% 0%, rgba(15,157,138,0.22), transparent 50%), radial-gradient(ellipse 50% 50% at 95% 100%, rgba(217,119,6,0.12), transparent 45%), linear-gradient(180deg, #292524 0%, #1c1917 45%, #0c0a09 100%)',
         }}
@@ -884,23 +1030,29 @@ function Footer() {
         <div className="max-w-7xl mx-auto">
           {/* Main row */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-10 pb-10 border-b border-white/10">
-            {/* Brand */}
-            <div className="max-w-sm">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-[11px] bg-gradient-to-br from-[#0f9d8a] to-[#0b7a6b] flex items-center justify-center shadow-[0_4px_14px_-2px_rgba(15,157,138,0.45)]">
-                  <span className="absolute w-10 h-10 rounded-[11px] border border-white/20 pointer-events-none" />
+            {/* Brand block — color locked on wrapper so title cannot inherit dark text */}
+            <div className="max-w-md" style={{ color: '#fafaf9' }}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="relative w-11 h-11 rounded-[12px] bg-gradient-to-br from-[#0f9d8a] to-[#0b7a6b] flex items-center justify-center shadow-[0_4px_14px_-2px_rgba(15,157,138,0.5)] shrink-0">
+                  <span className="absolute inset-[3px] rounded-[9px] border border-white/25 pointer-events-none" />
                   <div className="w-2.5 h-2.5 rounded-full bg-white" />
                 </div>
                 <div>
-                  <p className="font-display font-bold text-white text-lg tracking-tight leading-none">
+                  <p
+                    className="font-bold text-xl tracking-tight leading-none"
+                    style={{ color: '#ffffff', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
+                  >
                     SkillVault
                   </p>
-                  <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-stone-300 mt-1">
+                  <p
+                    className="text-[11px] font-mono uppercase tracking-[0.16em] mt-1.5"
+                    style={{ color: '#e7e5e4' }}
+                  >
                     Shop-floor knowledge
                   </p>
                 </div>
               </div>
-              <p className="text-sm text-stone-300 leading-relaxed">
+              <p className="text-[15px] leading-relaxed" style={{ color: '#e7e5e4' }}>
                 Capture what your best operators know — before it walks out the door.
               </p>
             </div>
@@ -931,11 +1083,11 @@ function Footer() {
           </div>
 
           {/* Bottom meta */}
-          <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px] text-stone-500">
-            <p className="font-mono">
+          <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px]">
+            <p className="font-mono" style={{ color: 'rgba(255,255,255,0.55)' }}>
               © {new Date().getFullYear()} SkillVault — a factory&apos;s collective brain.
             </p>
-            <p className="font-mono text-stone-600">
+            <p className="font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>
               Built with care for the shop floor
             </p>
           </div>

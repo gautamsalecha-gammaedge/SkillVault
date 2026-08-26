@@ -1,9 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, HardHat, UserCog, Mic2, ShieldCheck, Radio, MessageCircleQuestion, BookOpenCheck } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
-import { setWorkerSession, setAdminSession, clearAskChatStorage, clearWorkerSession, clearAdminSession } from '../../lib/auth';
+import {
+  setWorkerSession,
+  setAdminSession,
+  clearAskChatStorage,
+  clearWorkerSession,
+  clearAdminSession,
+} from '../../lib/auth';
 import { Input, Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { Brand } from '../../components/WorkerLayout';
@@ -42,6 +48,13 @@ export default function Login() {
   const [adminPassword, setAdminPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Visiting Login = signed out. Must enter ID + password again (no auto re-entry).
+  useEffect(() => {
+    clearWorkerSession();
+    clearAdminSession();
+    clearAskChatStorage();
+  }, []);
+
   const submitWorker = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -49,10 +62,12 @@ export default function Login() {
       const res = await api.workerLogin(workerId.trim(), password);
       // Always start a clean Ask session for this login (never show another worker's chat)
       clearWorkerSession();
+      clearAdminSession();
       setWorkerSession(res.token, res.name, workerId.trim());
       clearAskChatStorage();
       toast.success(`Welcome back, ${res.name}.`);
-      nav('/worker');
+      // replace: do not leave /login in history (Back would reopen the form)
+      nav('/worker', { replace: true });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Login failed.');
     } finally {
@@ -66,9 +81,10 @@ export default function Login() {
     try {
       const res = await api.adminLogin(username.trim(), adminPassword);
       clearAdminSession();
+      clearWorkerSession();
       setAdminSession(res.token, res.name);
       toast.success('Welcome back.');
-      nav('/admin');
+      nav('/admin', { replace: true });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Login failed.');
     } finally {

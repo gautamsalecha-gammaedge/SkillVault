@@ -1,9 +1,18 @@
 import { Navigate } from 'react-router-dom';
 import { getWorkerToken, getAdminToken } from './auth';
 
+/** Worker routes: no token → login (replace so history stays clean). */
 export function RequireWorker({ children }) {
-  return getWorkerToken() ? children : <Navigate to="/login" replace />;
+  if (!getWorkerToken()) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
 }
+
+/** Admin routes: no token → login (replace). */
 export function RequireAdmin({ children }) {
-  return getAdminToken() ? children : <Navigate to="/login" replace />;
+  if (!getAdminToken()) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
 }

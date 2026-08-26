@@ -48,7 +48,8 @@ export default function WorkerLayout() {
 
   const logout = () => {
     clearWorkerSession();
-    nav('/login');
+    // replace so Forward cannot return to a protected page after sign-out
+    nav('/login', { replace: true });
   };
 
   const onResizeStart = useCallback((e) => {

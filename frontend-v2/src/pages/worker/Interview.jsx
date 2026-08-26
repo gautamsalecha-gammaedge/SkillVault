@@ -57,6 +57,29 @@ export default function Interview() {
   const [autoPlay, setAutoPlay] = useState(true);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState(false);
+  /** When mic/camera blocked — stay here and let worker Allow / Retry (do not cancel interview). */
+  const [deviceIssue, setDeviceIssue] = useState(null); // { mic: bool, cam: bool, message: string }
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  const pendingFreshRef = useRef(false);
+  /** Page still mounted — false after navigate away so delayed audio/camera cannot start */
+  const mountedRef = useRef(true);
+  /** Bumps on leave/unmount so in-flight setup is ignored */
+  const sessionGenRef = useRef(0);
+  const timersRef = useRef([]);
+
+  const clearScheduled = () => {
+    timersRef.current.forEach((id) => clearTimeout(id));
+    timersRef.current = [];
+  };
+
+  const schedule = (fn, ms) => {
+    const id = setTimeout(() => {
+      if (!mountedRef.current) return;
+      fn();
+    }, ms);
+    timersRef.current.push(id);
+    return id;
+  };
 
   const recognitionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -72,16 +95,52 @@ export default function Interview() {
   const captionEndRef = useRef(null);
 
   useEffect(() => {
+    mountedRef.current = true;
     api.myMachines()
       .then((r) => {
+        if (!mountedRef.current) return;
         setMachines(r.machine_ids || []);
         if (r.machine_ids?.length) setMachineId(r.machine_ids[0]);
       })
-      .finally(() => setChecking(false));
+      .finally(() => {
+        if (mountedRef.current) setChecking(false);
+      });
     return () => {
-      stopListening();
-      stopAiAudio();
-      stopCamera();
+      // Leaving Interview page → hard stop everything (no delayed audio/camera)
+      mountedRef.current = false;
+      sessionGenRef.current += 1;
+      clearScheduled();
+      try { recognitionRef.current && recognitionRef.current.stop(); } catch (_) {}
+      recognitionRef.current = null;
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try { mediaRecorderRef.current.stop(); } catch (_) {}
+      }
+      mediaRecorderRef.current = null;
+      if (audioStreamRef.current) {
+        try { audioStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        audioStreamRef.current = null;
+      }
+      try { speakJobRef.current?.stop?.(); } catch (_) {}
+      speakJobRef.current = null;
+      if (audioElRef.current) {
+        try {
+          audioElRef.current.onended = null;
+          audioElRef.current.onerror = null;
+          audioElRef.current.pause();
+          audioElRef.current.src = '';
+        } catch (_) {}
+        audioElRef.current = null;
+      }
+      if (objectUrlRef.current) {
+        try { URL.revokeObjectURL(objectUrlRef.current); } catch (_) {}
+        objectUrlRef.current = null;
+      }
+      try { window.speechSynthesis?.cancel(); } catch (_) {}
+      if (camStreamRef.current) {
+        try { camStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        camStreamRef.current = null;
+      }
+      if (videoRef.current) videoRef.current.srcObject = null;
     };
   }, []);
 
@@ -126,10 +185,95 @@ export default function Interview() {
           videoRef.current.play().catch(() => {});
         }
       });
+      return true;
     } catch (_) {
       setCameraError(true);
       setCameraOn(false);
+      return false;
     }
+  };
+
+  /** Chrome/Edge permission state: prompt | granted | denied */
+  const readPerm = async (name) => {
+    try {
+      if (!navigator.permissions?.query) return 'unknown';
+      const st = await navigator.permissions.query({ name });
+      return st?.state || 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  };
+
+  /**
+   * Always call getUserMedia on the button click.
+   * - Permission "Ask" → Chrome shows Allow popup by the URL bar.
+   * - Previously "Block" → full popup may not return, but calling getUserMedia
+   *   still surfaces the camera/mic icon in the address bar so the user can Allow.
+   * Do NOT skip getUserMedia when denied — that blocked any browser UI.
+   */
+  const requestMicAndCamera = async () => {
+    let micOk = false;
+    let camOk = false;
+    let message = '';
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return {
+        micOk: false,
+        camOk: false,
+        message: 'This browser cannot access camera/microphone. Use Chrome or Edge.',
+      };
+    }
+
+    // Always request — this triggers the native popup or the URL-bar media icon
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+      const audioTracks = stream.getAudioTracks();
+      const videoTracks = stream.getVideoTracks();
+      audioTracks.forEach((t) => t.stop());
+      if (videoTracks.length) {
+        const videoOnly = new MediaStream(videoTracks);
+        stopCamera();
+        camStreamRef.current = videoOnly;
+        setCameraOn(true);
+        setCameraError(false);
+        requestAnimationFrame(() => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = videoOnly;
+            videoRef.current.play().catch(() => {});
+          }
+        });
+        camOk = true;
+      } else {
+        camOk = await startCamera();
+      }
+      micOk = true;
+    } catch (_) {
+      try {
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mic.getTracks().forEach((t) => t.stop());
+        micOk = true;
+      } catch (e) {
+        micOk = false;
+      }
+      camOk = await startCamera();
+    }
+
+    if (!micOk || !camOk) {
+      const micState = await readPerm('microphone');
+      const camState = await readPerm('camera');
+      if (micState === 'denied' || camState === 'denied') {
+        message =
+          'Still blocked. Look in the address bar for a camera/mic icon and click it → Allow. Or: lock icon left of the URL → Site settings → Camera & Microphone → Allow, then press Allow & try again.';
+      } else {
+        message =
+          'Choose Allow on the browser popup near the address bar, then press Allow & try again if needed.';
+      }
+    }
+
+    return { micOk, camOk, message };
   };
 
   /* ---------- TTS: browser primary → Sarvam fallback ---------- */
@@ -156,19 +300,27 @@ export default function Interview() {
 
   const speakQuestion = useCallback(async (text, lang) => {
     if (!text || !String(text).trim()) return;
+    if (!mountedRef.current) return; // left the page — never start audio
     stopAiAudio();
     setAiLoading(true);
     try {
       const job = speakSmart(String(text).trim(), lang || languageRef.current || defaultLanguage());
       speakJobRef.current = job;
+      if (!mountedRef.current) {
+        try { job.stop?.(); } catch (_) {}
+        speakJobRef.current = null;
+        return;
+      }
       setAiLoading(false);
       setAiSpeaking(true);
       await job;
     } catch (_) {
-      toast.error('Audio failed. You can still read the question.');
+      if (mountedRef.current) toast.error('Audio failed. You can still read the question.');
     } finally {
-      setAiSpeaking(false);
-      setAiLoading(false);
+      if (mountedRef.current) {
+        setAiSpeaking(false);
+        setAiLoading(false);
+      }
       speakJobRef.current = null;
     }
   }, [toast]);
@@ -192,6 +344,7 @@ export default function Interview() {
     if (aiSpeaking || aiLoading) stopAiAudio();
     setLiveCaption('');
     setListening(true);
+    // Reset voice buffer; answer is set once from this buffer (no double append)
     browserFinalRef.current = '';
     const lang = languageRef.current || defaultLanguage();
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -203,17 +356,21 @@ export default function Interview() {
       rec.lang = lang;
       rec.onresult = (event) => {
         let interim = '';
-        let final = '';
+        let finalChunk = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const r = event.results[i];
-          if (r.isFinal) final += r[0].transcript;
+          if (r.isFinal) finalChunk += r[0].transcript;
           else interim += r[0].transcript;
         }
-        if (final) {
-          browserFinalRef.current = `${browserFinalRef.current} ${final}`.trim();
-          setAnswer((t) => (t ? `${t} ${final}` : final).trim());
-          setLiveCaption(interim);
-        } else setLiveCaption(interim);
+        if (finalChunk) {
+          // Accumulate finals once
+          browserFinalRef.current = `${browserFinalRef.current} ${finalChunk}`.trim();
+          // Replace answer with full accumulated text (never append on top of itself)
+          setAnswer(browserFinalRef.current);
+        }
+        // Live line = committed + interim (display only)
+        const live = [browserFinalRef.current, interim].filter(Boolean).join(' ').trim();
+        setLiveCaption(live || interim || '…');
       };
       rec.onerror = () => {};
       try { rec.start(); } catch (_) {}
@@ -240,22 +397,12 @@ export default function Interview() {
     setLiveCaption('');
     try { recognitionRef.current && recognitionRef.current.stop(); } catch (_) {}
     recognitionRef.current = null;
-    const browserText = browserFinalRef.current;
+    const browserText = (browserFinalRef.current || '').trim();
     browserFinalRef.current = '';
 
-    const applyTranscript = (next, lang) => {
-      if (!next) return;
-      setAnswer((t) => {
-        if (!t) return next;
-        if (t.includes(next.slice(0, Math.min(16, next.length)))) return t;
-        return `${t} ${next}`.trim();
-      });
-      if (lang) languageRef.current = lang;
-    };
-
-    // Primary: browser already produced text
-    if ((browserText || '').trim().length >= 2) {
-      applyTranscript(browserText.trim(), languageRef.current);
+    // Browser already built the full answer once during listening — set once, do not append again
+    if (browserText.length >= 2) {
+      setAnswer(browserText);
       if (had) {
         try {
           const mr = mediaRecorderRef.current;
@@ -281,6 +428,7 @@ export default function Interview() {
       return;
     }
 
+    // Fallback only when browser gave no text
     if (!had) return;
     setTranscribing(true);
     await new Promise((resolve) => {
@@ -299,8 +447,12 @@ export default function Interview() {
             browserText: '',
             languageCode: languageRef.current,
           });
-          if (res.transcript) applyTranscript(res.transcript, res.language_code);
-          else toast.error("Couldn't transcribe — you can still type.");
+          if (res.transcript) {
+            setAnswer(res.transcript.trim()); // replace once
+            if (res.language_code) languageRef.current = res.language_code;
+          } else {
+            toast.error("Couldn't transcribe — you can still type.");
+          }
         } catch (_) {
           toast.error("Couldn't transcribe — you can still type.");
         } finally {
@@ -319,98 +471,131 @@ export default function Interview() {
   };
 
   /* ---------- Session ---------- */
+  const beginInterviewSession = async (fresh) => {
+    const gen = sessionGenRef.current;
+    const res = await api.startInterview(machineId, languageRef.current || 'en-IN', fresh);
+    // User left the page while API was in flight — do not enter live or play audio
+    if (!mountedRef.current || gen !== sessionGenRef.current) return;
+
+    setSetupStep(SETUP_STEPS.length - 1);
+    await new Promise((r) => {
+      const id = setTimeout(r, 350);
+      timersRef.current.push(id);
+    });
+    if (!mountedRef.current || gen !== sessionGenRef.current) return;
+
+    setSession(res);
+    if (res.language_code) languageRef.current = res.language_code;
+
+    const hist = [];
+    if (res.resumed) {
+      try {
+        const t = await api.interviewTranscript(res.session_id);
+        (t.turns || []).forEach((turn) => {
+          hist.push({ role: 'q', text: turn.question_text, topic: turn.topic_title });
+          hist.push({ role: 'a', text: turn.answer_text });
+        });
+      } catch (_) {}
+    }
+    if (!mountedRef.current || gen !== sessionGenRef.current) return;
+    setHistory(hist);
+    setDeviceIssue(null);
+
+    if (res.current_question) {
+      const q = {
+        text: res.current_question,
+        topic: res.topic_title,
+        followup: !!res.is_followup,
+      };
+      setCurrentQ(q);
+      setPhase('live');
+      schedule(() => {
+        if (camStreamRef.current && videoRef.current) {
+          videoRef.current.srcObject = camStreamRef.current;
+          videoRef.current.play().catch(() => {});
+        } else {
+          startCamera();
+        }
+      }, 100);
+      if (autoPlay) {
+        schedule(() => speakQuestion(q.text, languageRef.current), 600);
+      }
+    } else if (res.completed) {
+      stopCamera();
+      setPhase('done');
+    } else {
+      setPhase('live');
+      schedule(() => startCamera(), 100);
+    }
+  };
+
   const runSetupThenStart = async (fresh) => {
     if (!machineId) {
       toast.error('Select a machine first.');
       return;
     }
-    setPhase('setup');
-    setSetupStep(0);
-    const stepTimers = SETUP_STEPS.map((_, i) =>
-      setTimeout(() => setSetupStep(i), i * 650)
-    );
+    pendingFreshRef.current = !!fresh;
+    setDeviceIssue(null);
+    setDeviceBusy(true);
     try {
-      // 1) Microphone must work (answers are voice-first)
+      // Request media FIRST (same click) so the URL-bar Allow popup can show
+      const { micOk, camOk, message } = await requestMicAndCamera();
+      if (!micOk || !camOk) {
+        setDeviceIssue({
+          mic: micOk,
+          cam: camOk,
+          message: message || 'Allow camera and microphone when the browser asks near the address bar.',
+        });
+        setPhase('permissions');
+        return;
+      }
+
+      if (!mountedRef.current) return;
+      setPhase('setup');
       setSetupStep(0);
-      try {
-        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mic.getTracks().forEach((t) => t.stop());
-      } catch (micErr) {
-        stepTimers.forEach(clearTimeout);
-        toast.error('Microphone is required for the interview. Allow mic access and try again.');
-        setPhase('lobby');
-        return;
-      }
-
-      // 2) Camera preview must start (video panel is part of the room UI)
-      setSetupStep(1);
-      setCameraError(false);
-      try {
-        await startCamera();
-        // startCamera sets cameraError on failure but does not throw — verify stream
-        if (!camStreamRef.current) {
-          throw new Error('camera failed');
-        }
-      } catch (_) {
-        stepTimers.forEach(clearTimeout);
-        setCameraError(true);
-        toast.error('Camera is required to enter the interview room. Allow camera access and try again.');
-        setPhase('lobby');
-        stopCamera();
-        return;
-      }
-
-      setSetupStep(2);
-      const res = await api.startInterview(machineId, languageRef.current || 'en-IN', fresh);
+      SETUP_STEPS.forEach((_, i) => schedule(() => setSetupStep(i), i * 500));
       setSetupStep(SETUP_STEPS.length - 1);
-      await new Promise((r) => setTimeout(r, 400));
-
-      setSession(res);
-      if (res.language_code) languageRef.current = res.language_code;
-
-      const hist = [];
-      if (res.resumed) {
-        try {
-          const t = await api.interviewTranscript(res.session_id);
-          (t.turns || []).forEach((turn) => {
-            hist.push({ role: 'q', text: turn.question_text, topic: turn.topic_title });
-            hist.push({ role: 'a', text: turn.answer_text });
-          });
-        } catch (_) {}
-      }
-      setHistory(hist);
-
-      if (res.current_question) {
-        const q = {
-          text: res.current_question,
-          topic: res.topic_title,
-          followup: !!res.is_followup,
-        };
-        setCurrentQ(q);
-        setPhase('live');
-        // Re-attach camera after live mounts
-        setTimeout(() => {
-          if (camStreamRef.current && videoRef.current) {
-            videoRef.current.srcObject = camStreamRef.current;
-            videoRef.current.play().catch(() => {});
-          } else {
-            startCamera();
-          }
-        }, 100);
-        if (autoPlay) setTimeout(() => speakQuestion(q.text, languageRef.current), 600);
-      } else if (res.completed) {
-        stopCamera();
-        setPhase('done');
-      } else {
-        setPhase('live');
-        setTimeout(() => startCamera(), 100);
-      }
+      await beginInterviewSession(fresh);
     } catch (err) {
-      stepTimers.forEach(clearTimeout);
       toast.error(err instanceof ApiError ? err.message : 'Could not start the interview.');
       setPhase('lobby');
       stopCamera();
+    } finally {
+      setDeviceBusy(false);
     }
+  };
+
+  /** Worker taps Allow / Try again — must call getUserMedia in this click to show browser popup */
+  const retryDevicesAndStart = async () => {
+    setDeviceBusy(true);
+    try {
+      const { micOk, camOk, message } = await requestMicAndCamera();
+      if (!micOk || !camOk) {
+        setDeviceIssue({
+          mic: micOk,
+          cam: camOk,
+          message:
+            message ||
+            'Still blocked. Click the lock icon left of the URL → Site settings → Camera & Microphone → Allow, then try again.',
+        });
+        return;
+      }
+      setDeviceIssue(null);
+      setPhase('setup');
+      setSetupStep(SETUP_STEPS.length - 1);
+      await beginInterviewSession(pendingFreshRef.current);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Could not start the interview.');
+      setPhase('permissions');
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+
+  const backToLobbyFromPermissions = () => {
+    setDeviceIssue(null);
+    stopCamera();
+    setPhase('lobby');
   };
 
   const submitAnswer = async () => {
@@ -449,7 +634,7 @@ export default function Interview() {
           insight: res.insight_captured,
         };
         setCurrentQ(q);
-        if (autoPlay) setTimeout(() => speakQuestion(q.text, languageRef.current), 450);
+        if (autoPlay) schedule(() => speakQuestion(q.text, languageRef.current), 450);
       }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not submit that answer.');
@@ -496,6 +681,72 @@ export default function Interview() {
   };
 
   if (checking) return <FullPageLoader label="Loading interview…" />;
+
+  /* ========== PERMISSIONS (mic/camera blocked — give worker a chance to Allow) ========== */
+  if (phase === 'permissions') {
+    const micOk = deviceIssue?.mic;
+    const camOk = deviceIssue?.cam;
+    return (
+      <div className="max-w-lg mx-auto py-10">
+        <Card className="p-8 md:p-10 border-2 border-line">
+          <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-amber/15 border-2 border-amber/35 flex items-center justify-center text-amber">
+            <Video size={28} />
+          </div>
+          <h1 className="text-2xl font-semibold text-center mb-2">Allow camera & microphone</h1>
+          <p className="text-[15px] text-muted text-center leading-relaxed mb-6">
+            The interview room needs both. Your camera is <strong className="text-text">preview only</strong> (not recorded).
+            Voice answers use the microphone.
+          </p>
+
+          <div className="space-y-3 mb-6">
+            <div className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${micOk ? 'border-signal/40 bg-signal/5' : 'border-danger/40 bg-danger/5'}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${micOk ? 'bg-signal text-white' : 'bg-danger/15 text-danger'}`}>
+                {micOk ? <CheckCircle2 size={18} /> : <Mic size={18} />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text">Microphone</p>
+                <p className="text-xs text-muted">{micOk ? 'Ready' : 'Not allowed yet — use Allow below'}</p>
+              </div>
+            </div>
+            <div className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${camOk ? 'border-signal/40 bg-signal/5' : 'border-danger/40 bg-danger/5'}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${camOk ? 'bg-signal text-white' : 'bg-danger/15 text-danger'}`}>
+                {camOk ? <CheckCircle2 size={18} /> : <VideoOff size={18} />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text">Camera</p>
+                <p className="text-xs text-muted">{camOk ? 'Ready' : 'Not allowed yet — use Allow below'}</p>
+              </div>
+            </div>
+          </div>
+
+          {deviceIssue?.message && (
+            <p className="text-sm text-muted leading-relaxed mb-6 rounded-xl bg-surface-2 border border-line px-4 py-3">
+              {deviceIssue.message}
+            </p>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button
+              variant="amber"
+              size="lg"
+              className="flex-1"
+              loading={deviceBusy}
+              onClick={retryDevicesAndStart}
+              icon={Video}
+            >
+              Allow & try again
+            </Button>
+            <Button variant="ghost" size="lg" className="flex-1" disabled={deviceBusy} onClick={backToLobbyFromPermissions}>
+              Back to lobby
+            </Button>
+          </div>
+          <p className="text-xs text-muted text-center mt-4 leading-relaxed">
+            If the browser does not ask again, open the lock icon in the address bar → Site settings → set Camera and Microphone to Allow.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   /* ========== SETUP ========== */
   if (phase === 'setup') {
