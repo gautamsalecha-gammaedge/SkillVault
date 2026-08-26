@@ -2,19 +2,21 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   MessageCircleQuestion, ShieldCheck, ListChecks, Mic2,
-  Ticket, Settings, LogOut, Gauge, Menu,
+  Ticket, Settings, LogOut, Gauge, Menu, NotebookPen,
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getWorkerName, getWorkerId, clearWorkerSession } from '../lib/auth';
 import PageTransition from './PageTransition';
 
 const NAV = [
+  // High-frequency first · Interview is rare · Profile last
   { to: '/worker', label: 'Overview', icon: Gauge, end: true },
   { to: '/worker/ask', label: 'Ask AI', icon: MessageCircleQuestion },
+  { to: '/worker/daily-update', label: 'Daily update', icon: NotebookPen },
   { to: '/worker/safety', label: 'Safety', icon: ShieldCheck },
   { to: '/worker/my-tips', label: 'Tips', icon: ListChecks },
-  { to: '/worker/interview', label: 'Interview', icon: Mic2 },
   { to: '/worker/my-tickets', label: 'Tickets', icon: Ticket },
+  { to: '/worker/interview', label: 'Interview', icon: Mic2 },
   { to: '/worker/settings', label: 'Profile', icon: Settings },
 ];
 

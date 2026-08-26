@@ -249,6 +249,35 @@ export const api = {
   removeSafetyVideo: (measureId) => apiFetch(`/admin/safety/${encodeURIComponent(measureId)}/video`, { method: 'DELETE', auth: 'admin' }),
 
   /* ---------------- Tickets ---------------- */
+
+  /* ---------------- Daily Updates (Postgres, not RAG) ---------------- */
+  optimizeDailyUpdate: (text, machine_id = null) =>
+    apiFetch('/daily-updates/optimize', {
+      method: 'POST',
+      auth: 'worker',
+      body: { text, machine_id: machine_id || null },
+    }),
+  submitDailyUpdate: (data) =>
+    apiFetch('/daily-updates', { method: 'POST', auth: 'worker', body: data }),
+  myDailyUpdates: () => apiFetch('/daily-updates/my', { auth: 'worker' }),
+  adminDailyUpdates: (opts = {}) => {
+    // opts: report_date | from_date, to_date | machine_id | worker_id | limit
+    const params = new URLSearchParams();
+    if (typeof opts === 'string') {
+      // legacy: adminDailyUpdates(date, machineId)
+      params.set('report_date', opts);
+    } else if (opts && typeof opts === 'object') {
+      if (opts.report_date) params.set('report_date', opts.report_date);
+      if (opts.from_date) params.set('from_date', opts.from_date);
+      if (opts.to_date) params.set('to_date', opts.to_date);
+      if (opts.machine_id) params.set('machine_id', opts.machine_id);
+      if (opts.worker_id) params.set('worker_id', opts.worker_id);
+      if (opts.limit) params.set('limit', String(opts.limit));
+    }
+    const qs = params.toString();
+    return apiFetch(qs ? `/admin/daily-updates?${qs}` : '/admin/daily-updates', { auth: 'admin' });
+  },
+
   createTicket: (data) => apiFetch('/tickets', { method: 'POST', auth: 'worker', body: data }),
   myTickets: () => apiFetch('/tickets/my', { auth: 'worker' }),
   adminTickets: (params = null) => {

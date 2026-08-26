@@ -166,3 +166,17 @@ class ReorderSafetyMeasuresRequest(BaseModel):
 
 class CompleteSafetyRequest(BaseModel):
     language_code: str = "en-IN"
+
+
+# ---------- Daily Updates (Postgres only, not RAG) ----------
+
+class OptimizeDailyUpdateRequest(BaseModel):
+    text: str
+    machine_id: Optional[str] = None
+
+
+class SubmitDailyUpdateRequest(BaseModel):
+    raw_text: str
+    optimized_text: str
+    machine_id: Optional[str] = None
+    report_date: Optional[str] = None  # YYYY-MM-DD; defaults to today UTC if omitted

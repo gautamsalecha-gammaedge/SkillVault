@@ -28,7 +28,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import os
 
-from routers import ask, knowledge, worker, admin, voice, tickets, analytics, interview , safety
+from routers import ask, knowledge, worker, admin, voice, tickets, analytics, interview , safety, daily_updates
 # Rate limiter based on client IP
 limiter = Limiter(key_func=get_remote_address)
 
@@ -50,8 +50,8 @@ app.add_middleware(
 
 # ---------- Video / Uploads support ----------
 os.makedirs("uploads/videos", exist_ok=True)
+os.makedirs("uploads/images", exist_ok=True)  # tip + ask photos
 os.makedirs("uploads/interview_audio", exist_ok=True)  # Tacit Knowledge Capture answer recordings
-os.makedirs("uploads/images", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # ---------- Routers ----------
@@ -66,7 +66,8 @@ app.include_router(interview.router)         # /interview/*        - worker inte
 app.include_router(interview.admin_router)   # /admin/interview-*  - admin session review
 app.include_router(safety.router)            # /safety/*           - worker safety briefing
 app.include_router(safety.admin_router)      # /admin/safety/*     - admin manage measures
-
+app.include_router(daily_updates.router)     # /daily-updates/*    - worker daily notes
+app.include_router(daily_updates.admin_router)  # /admin/daily-updates
 
 @app.get("/")
 def root():

@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   LayoutDashboard, UserCheck, Users, BookOpenText, FileStack,
-  ShieldCheck, Ticket, UserCog, LogOut, Menu,
+  ShieldCheck, Ticket, UserCog, LogOut, Menu, NotebookPen,
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getAdminName, clearAdminSession } from '../lib/auth';
@@ -17,6 +17,7 @@ const NAV = [
   { to: '/admin/manuals', label: 'Manuals', icon: FileStack },
   { to: '/admin/safety-measures', label: 'Safety Measures', icon: ShieldCheck },
   { to: '/admin/tickets', label: 'Tickets', icon: Ticket },
+  { to: '/admin/daily-updates', label: 'Daily updates', icon: NotebookPen },
   { to: '/admin/profile', label: 'Profile', icon: UserCog },
 ];
 

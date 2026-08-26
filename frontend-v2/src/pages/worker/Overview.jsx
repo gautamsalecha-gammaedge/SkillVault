@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   MessageCircleQuestion, ShieldCheck, PlusCircle, Mic2, Ticket,
-  ArrowUpRight, Factory, ListChecks, Sparkles,
+  ArrowUpRight, Factory, ListChecks, Sparkles, NotebookPen,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { getWorkerName } from '../../lib/auth';
@@ -28,17 +28,23 @@ export default function Overview() {
   const [safety, setSafety] = useState([]);
   const [tips, setTips] = useState([]);
   const [tickets, setTickets] = useState([]);
+  const [dailyUpdates, setDailyUpdates] = useState([]);
 
   useEffect(() => {
     (async () => {
       try {
-        const [m, s, t, tk] = await Promise.all([
-          api.myMachines(), api.mySafetyStatus(), api.myTips(), api.myTickets(),
+        const [m, s, t, tk, du] = await Promise.all([
+          api.myMachines(),
+          api.mySafetyStatus(),
+          api.myTips(),
+          api.myTickets(),
+          api.myDailyUpdates().catch(() => ({ updates: [] })),
         ]);
         setMachines(m.machine_ids || []);
         setSafety(s.machines || []);
         setTips(t.tips || []);
         setTickets(tk || []);
+        setDailyUpdates(du.updates || []);
       } catch (_) {} finally {
         setLoading(false);
       }
@@ -50,7 +56,13 @@ export default function Overview() {
   const pendingSafety = safety.filter((s) => !s.completed).length;
   const pendingTips = tips.filter((t) => t.status === 'pending').length;
   const openTickets = tickets.filter((t) => t.status === 'Open' || t.status === 'In Progress').length;
+  const todayIso = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  const todayUpdates = dailyUpdates.filter((u) => u.report_date === todayIso).length;
 
+  // High-use first: Ask, Daily update, Safety, Tips — Interview is rare, not on this grid
   const actions = [
     {
       to: '/worker/ask',
@@ -58,6 +70,15 @@ export default function Overview() {
       body: 'Get a grounded, spoken answer about any assigned machine — from manuals and approved tips only.',
       icon: MessageCircleQuestion,
       tone: 'signal',
+    },
+    {
+      to: '/worker/daily-update',
+      title: 'Daily update',
+      body: todayUpdates
+        ? `You filed ${todayUpdates} update${todayUpdates > 1 ? 's' : ''} today. Add another or open history anytime.`
+        : 'End of shift: tell what you did today. AI cleans the wording, then your supervisor can read it.',
+      icon: NotebookPen,
+      tone: todayUpdates ? 'signal' : 'amber',
     },
     {
       to: '/worker/safety',
@@ -73,13 +94,6 @@ export default function Overview() {
       title: 'Add a tip',
       body: 'Share something you know before it is forgotten. AI helps sharpen it, then a supervisor reviews.',
       icon: PlusCircle,
-      tone: 'signal',
-    },
-    {
-      to: '/worker/interview',
-      title: 'Tacit Interview',
-      body: 'Let AI walk you through what you know, topic by topic — voice answers with live captions.',
-      icon: Mic2,
       tone: 'signal',
     },
   ];
@@ -130,27 +144,24 @@ export default function Overview() {
         variants={container}
         initial="hidden"
         animate="show"
-        className="grid lg:grid-cols-3 gap-5 mb-10"
+        className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10"
       >
         <motion.div variants={item}>
           <Card className="p-6 h-full">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display font-bold text-xl flex items-center gap-2">
-                <Factory size={20} className="text-signal" /> My machines
+                <Factory size={20} className="text-signal" /> Machines
               </h3>
               <Badge tone="signal">{machines.length}</Badge>
             </div>
             {machines.length === 0 ? (
               <p className="text-[15px] text-muted leading-relaxed">
-                No machines assigned yet. Ask your supervisor to assign you one.
+                No machines assigned yet.
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {machines.map((m) => (
-                  <span
-                    key={m}
-                    className="font-mono text-sm px-3.5 py-2 rounded-full bg-surface-3 border border-line"
-                  >
+                  <span key={m} className="font-mono text-sm px-3.5 py-2 rounded-full bg-surface-3 border border-line">
                     {m}
                   </span>
                 ))}
@@ -163,19 +174,35 @@ export default function Overview() {
           <Card className="p-6 h-full">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display font-bold text-xl flex items-center gap-2">
-                <ListChecks size={20} className="text-signal" /> My tips
+                <NotebookPen size={20} className="text-signal" /> Daily updates
+              </h3>
+              <Badge tone={todayUpdates ? 'signal' : 'amber'}>{dailyUpdates.length}</Badge>
+            </div>
+            <p className="text-[15px] text-muted leading-relaxed">
+              {todayUpdates > 0
+                ? `${todayUpdates} filed today · ${dailyUpdates.length} total in history.`
+                : dailyUpdates.length
+                  ? `Nothing today yet · ${dailyUpdates.length} in history.`
+                  : 'No updates yet. File one at end of shift.'}
+            </p>
+            <Link to="/worker/daily-update" className="inline-flex items-center gap-1.5 text-sm font-semibold text-signal mt-4 hover:underline">
+              Open <ArrowUpRight size={14} />
+            </Link>
+          </Card>
+        </motion.div>
+
+        <motion.div variants={item}>
+          <Card className="p-6 h-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display font-bold text-xl flex items-center gap-2">
+                <ListChecks size={20} className="text-signal" /> Tips
               </h3>
               <Badge tone={pendingTips ? 'amber' : 'signal'}>{tips.length}</Badge>
             </div>
             <p className="text-[15px] text-muted leading-relaxed">
-              {pendingTips > 0
-                ? `${pendingTips} awaiting admin review.`
-                : 'All your tips have been reviewed.'}
+              {pendingTips > 0 ? `${pendingTips} awaiting admin review.` : 'All your tips have been reviewed.'}
             </p>
-            <Link
-              to="/worker/my-tips"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-signal mt-4 hover:underline"
-            >
+            <Link to="/worker/my-tips" className="inline-flex items-center gap-1.5 text-sm font-semibold text-signal mt-4 hover:underline">
               View all <ArrowUpRight size={14} />
             </Link>
           </Card>
@@ -185,19 +212,14 @@ export default function Overview() {
           <Card className="p-6 h-full">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display font-bold text-xl flex items-center gap-2">
-                <Ticket size={20} className="text-signal" /> My tickets
+                <Ticket size={20} className="text-signal" /> Tickets
               </h3>
               <Badge tone={openTickets ? 'amber' : 'signal'}>{tickets.length}</Badge>
             </div>
             <p className="text-[15px] text-muted leading-relaxed">
-              {openTickets > 0
-                ? `${openTickets} open or in progress.`
-                : 'Nothing open right now.'}
+              {openTickets > 0 ? `${openTickets} open or in progress.` : 'Nothing open right now.'}
             </p>
-            <Link
-              to="/worker/my-tickets"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-signal mt-4 hover:underline"
-            >
+            <Link to="/worker/my-tickets" className="inline-flex items-center gap-1.5 text-sm font-semibold text-signal mt-4 hover:underline">
               View all <ArrowUpRight size={14} />
             </Link>
           </Card>
@@ -219,7 +241,7 @@ export default function Overview() {
           <p className="text-[15px] text-muted leading-relaxed">
             Start with <strong className="text-text">Safety</strong> if anything is still required.
             Use <strong className="text-text">Ask AI</strong> mid-shift for machine questions.
-            Capture tips and interviews so knowledge stays when people rotate or retire.
+            File a <strong className="text-text">Daily update</strong> at end of shift so supervisors see what happened.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">

@@ -215,3 +215,20 @@ class SafetyCompletion(Base):
     machine_id = Column(String, nullable=False)
     language_code = Column(String, nullable=False, default="en-IN")
     completed_at = Column(DateTime, default=datetime.utcnow)
+
+class DailyUpdate(Base):
+    """
+    Worker end-of-shift / daily status notes.
+    Stored in Postgres only (not Chroma) — operational log, not RAG knowledge.
+    """
+    __tablename__ = "daily_updates"
+
+    id = Column(String, primary_key=True)  # uuid
+    worker_id = Column(String, ForeignKey("workers.worker_id"), nullable=False)
+    worker_name = Column(String, nullable=True)
+    machine_id = Column(String, nullable=True)
+    report_date = Column(String, nullable=False)  # YYYY-MM-DD (local day chosen by worker)
+    raw_text = Column(Text, nullable=False)       # what the worker first wrote/spoke
+    optimized_text = Column(Text, nullable=False) # AI-polished version they submitted
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
