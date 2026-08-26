@@ -68,7 +68,7 @@ export default function KnowledgeReview() {
             tab === 'tips' ? 'bg-amber text-[#221400] shadow-sm' : 'text-muted hover:text-text'
           }`}
         >
-          <BookOpenText size={16} /> Tips queue
+          <BookOpenText size={16} /> Tips review
         </button>
         <button
           type="button"
@@ -77,7 +77,7 @@ export default function KnowledgeReview() {
             tab === 'interviews' ? 'bg-amber text-[#221400] shadow-sm' : 'text-muted hover:text-text'
           }`}
         >
-          <Mic2 size={16} /> Interview sessions
+          <Mic2 size={16} /> Interview review
         </button>
       </div>
 

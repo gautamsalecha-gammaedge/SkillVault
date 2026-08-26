@@ -122,32 +122,41 @@ def my_machines(worker: dict = Depends(require_worker), db: Session = Depends(ge
 @router.get("/my-tips")
 def my_tips(worker: dict = Depends(require_worker)):
     """
-    Returns every knowledge entry this worker has personally submitted,
-    across all machines, with each one's current status.
-
-    Status is either "pending" (awaiting admin review, not yet
-    searchable via /ask) or "approved" (live in the knowledge base).
-    There is no "rejected" status - rejecting a tip is a hard delete
-    (see admin.py's delete_entry), so a rejected tip simply stops
-    appearing here rather than showing a rejected badge.
-
-    No submission timestamp is stored today, so results aren't sorted
-    by date - only whatever order Chroma returns them in.
+    Returns every knowledge entry this worker submitted, including
+    video_url / image_url so the Library can show media.
     """
-    results = collection.get(where={"worker_id": worker["worker_id"]})
+    import re
+    results = collection.get(
+        where={"worker_id": worker["worker_id"]},
+        include=["documents", "metadatas"],
+    )
 
     tips = []
-    for i in range(len(results["ids"])):
-        meta = results["metadatas"][i]
+    ids = results.get("ids") or []
+    docs = results.get("documents") or []
+    metas = results.get("metadatas") or []
+    for i in range(len(ids)):
+        meta = metas[i] or {}
+        raw = docs[i] or ""
+        # Tip body without long AI understanding blocks
+        display = re.split(
+            r"\n\s*\[(?:Video Understanding|Image Understanding|Transcript|Image Text)\]",
+            raw,
+            maxsplit=1,
+        )[0].strip() or raw
         tips.append({
-            "id": results["ids"][i],
-            "text": results["documents"][i],
+            "id": ids[i],
+            "text": display,
+            "full_text": raw,
             "machine_id": meta.get("machine_id"),
             "status": meta.get("status", "pending"),
+            "video_url": meta.get("video_url") or None,
+            "image_url": meta.get("image_url") or None,
+            "created_at": meta.get("created_at") or meta.get("submitted_at") or None,
         })
 
+    tips.sort(key=lambda t: t.get("created_at") or "", reverse=True)
     return {"tips": tips}
-
 
 @router.get("/profile")
 def get_my_profile(worker: dict = Depends(require_worker), db: Session = Depends(get_db)):

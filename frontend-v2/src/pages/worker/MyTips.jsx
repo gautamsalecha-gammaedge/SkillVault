@@ -3,9 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ListChecks, Plus, CheckCircle2, Clock, Sparkles, UploadCloud, X,
   Video, Image as ImageIcon, Camera, Circle, Square, Mic, Loader2,
-  ShieldCheck, ArrowRight, Pencil, MessageCircle, FileCheck,
+  ShieldCheck, ArrowRight, Pencil, MessageCircle, FileCheck, Play, Film,
 } from 'lucide-react';
-import { api, ApiError } from '../../lib/api';
+import { api, ApiError, mediaUrl } from '../../lib/api';
 import { transcribeSmart, defaultLanguage } from '../../lib/voice';
 import {
   FullPageLoader, EmptyState, Badge, Card,
@@ -175,6 +175,11 @@ export default function MyTips() {
   const openCamera = async (mode) => {
     stopCamera();
     setCameraMode(mode);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error('Camera not supported in this browser. Use Chrome or Edge.');
+      return;
+    }
+    // Always call getUserMedia so Chrome can show Allow popup or address-bar camera icon
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -188,8 +193,14 @@ export default function MyTips() {
           videoRef.current.play().catch(() => {});
         }
       });
-    } catch (_) {
-      toast.error('Camera access denied or unavailable.');
+    } catch (err) {
+      if (err?.name === 'NotAllowedError') {
+        toast.error(
+          'Camera not allowed. Check the address bar for a camera icon → Allow, or lock icon → Site settings → Camera → Allow, then try again.'
+        );
+      } else {
+        toast.error('Camera unavailable. Check that a camera is connected.');
+      }
     }
   };
 
@@ -858,10 +869,46 @@ export default function MyTips() {
           </motion.div>
         ) : (
           <motion.div key="library" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+            {/* Library hero strip */}
+            <div
+              className="relative overflow-hidden rounded-3xl border-2 border-line mb-6 p-6 md:p-8"
+              style={{
+                background: 'linear-gradient(135deg, rgba(15,157,138,0.12) 0%, rgba(255,252,248,0.95) 45%, rgba(217,119,6,0.10) 100%)',
+              }}
+            >
+              <div className="absolute inset-0 pointer-events-none opacity-[0.35]" style={{
+                backgroundImage: 'linear-gradient(rgba(28,25,23,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(28,25,23,0.04) 1px, transparent 1px)',
+                backgroundSize: '28px 28px',
+              }} />
+              <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-signal mb-1">Your knowledge shelf</p>
+                  <h2 className="text-2xl md:text-3xl font-semibold text-text tracking-tight">Library</h2>
+                  <p className="text-[15px] text-muted mt-1.5 max-w-xl leading-relaxed">
+                    Tips you shared — text, photos, and videos. Live ones are searchable in Ask AI after approval.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <div className="rounded-2xl border-2 border-line bg-surface/90 px-4 py-3 text-center min-w-[88px] shadow-sm">
+                    <p className="text-2xl font-bold text-text" style={numStyle}>{counts.all}</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total</p>
+                  </div>
+                  <div className="rounded-2xl border-2 border-signal/30 bg-signal/10 px-4 py-3 text-center min-w-[88px]">
+                    <p className="text-2xl font-bold text-signal" style={numStyle}>{counts.approved}</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-signal/80">Live</p>
+                  </div>
+                  <div className="rounded-2xl border-2 border-amber/30 bg-amber/10 px-4 py-3 text-center min-w-[88px]">
+                    <p className="text-2xl font-bold text-amber" style={numStyle}>{counts.pending}</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-amber/80">Review</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
               <div className="flex flex-wrap gap-2">
                 {[
-                  { key: 'all', label: 'Shared', n: counts.all },
+                  { key: 'all', label: 'All', n: counts.all },
                   { key: 'approved', label: 'Live', n: counts.approved },
                   { key: 'pending', label: 'In review', n: counts.pending },
                 ].map((s) => (
@@ -869,8 +916,10 @@ export default function MyTips() {
                     key={s.key}
                     type="button"
                     onClick={() => setFilter(s.key)}
-                    className={'inline-flex items-center gap-2 px-4 py-2 rounded-full border-2 text-sm font-semibold ' + (
-                      filter === s.key ? 'bg-amber text-white border-amber' : 'bg-surface border-line text-text hover:border-amber/50'
+                    className={'inline-flex items-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-semibold transition-all ' + (
+                      filter === s.key
+                        ? 'bg-amber text-white border-amber shadow-md shadow-amber/20'
+                        : 'bg-surface border-line text-text hover:border-amber/50'
                     )}
                   >
                     {s.label}
@@ -884,7 +933,7 @@ export default function MyTips() {
                 <select
                   value={machineFilter}
                   onChange={(e) => setMachineFilter(e.target.value)}
-                  className="bg-surface-2 border-2 border-line rounded-xl px-4 py-2.5 text-sm font-semibold text-text outline-none focus:border-amber"
+                  className="bg-surface border-2 border-line rounded-xl px-4 py-2.5 text-sm font-semibold text-text outline-none focus:border-amber shadow-sm"
                 >
                   <option value="all">All machines</option>
                   {machineOptions.map((m) => (
@@ -893,45 +942,120 @@ export default function MyTips() {
                 </select>
               )}
             </div>
-            <Card className="p-7 md:p-9 border-2 border-line min-h-[480px]">
-              {loading ? (
-                <FullPageLoader label="Loading tips…" />
-              ) : filtered.length === 0 ? (
+
+            {loading ? (
+              <FullPageLoader label="Loading your library…" />
+            ) : filtered.length === 0 ? (
+              <Card className="p-12 border-2 border-line min-h-[360px] flex items-center justify-center">
                 <EmptyState
                   icon={ListChecks}
-                  title="No tips yet"
-                  description="Capture a tip — AI checks it, then you confirm before review."
+                  title="No tips in this view"
+                  description="Capture a tip with text, photo, or video — it will show up here after you submit."
                   action={<Button variant="amber" size="lg" onClick={() => setTab('capture')} icon={Plus}>Capture a tip</Button>}
                 />
-              ) : (
-                <div className="space-y-3">
-                  {filtered.map((t, i) => (
-                    <motion.div
+              </Card>
+            ) : (
+              <div className="grid gap-5 sm:grid-cols-1 lg:grid-cols-2">
+                {filtered.map((t, i) => {
+                  const img = mediaUrl(t.image_url);
+                  const vid = mediaUrl(t.video_url);
+                  const live = t.status === 'approved';
+                  const pending = t.status === 'pending' || (!live && t.status !== 'rejected');
+                  return (
+                    <motion.article
                       key={t.id}
-                      initial={{ opacity: 0, y: 10 }}
+                      initial={{ opacity: 0, y: 14 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: Math.min(i * 0.04, 0.25) }}
-                      className="rounded-xl border-2 border-line bg-surface-2 p-5"
+                      transition={{ delay: Math.min(i * 0.05, 0.3), type: 'spring', stiffness: 320, damping: 28 }}
+                      className="group relative overflow-hidden rounded-2xl border-2 border-line bg-surface shadow-sm hover:shadow-lg hover:border-signal/35 transition-all"
                     >
-                      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-surface border border-line">{t.machine_id}</span>
-                          {(t.created_at || t.submitted_at || t.timestamp) && (
-                            <span className="text-xs font-mono text-muted">
-                              {new Date(t.created_at || t.submitted_at || t.timestamp).toLocaleString()}
-                            </span>
+                      <div className={'absolute left-0 top-0 bottom-0 w-1.5 ' + (live ? 'bg-signal' : pending ? 'bg-amber' : 'bg-muted')} />
+                      {(img || vid) && (
+                        <div className="relative bg-stone-900/95 border-b border-line">
+                          {vid ? (
+                            <div className="relative aspect-video">
+                              <video
+                                src={vid}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className="w-full h-full object-contain bg-black"
+                              />
+                              <span className="absolute top-3 left-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/65 text-white text-[11px] font-semibold border border-white/15">
+                                <Film size={12} /> Video tip
+                              </span>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setLightboxSrc(img)}
+                              className="block w-full aspect-[16/10] relative overflow-hidden"
+                              title="View full image"
+                            >
+                              <img
+                                src={img}
+                                alt="Tip attachment"
+                                className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
+                              />
+                              <span className="absolute top-3 left-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/65 text-white text-[11px] font-semibold border border-white/15">
+                                <ImageIcon size={12} /> Photo · tap to enlarge
+                              </span>
+                              <span className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-white/90 text-text flex items-center justify-center shadow">
+                                <Play size={14} className="opacity-0" />
+                                <ImageIcon size={16} />
+                              </span>
+                            </button>
                           )}
                         </div>
-                        {t.status === 'approved'
-                          ? <Badge tone="signal"><CheckCircle2 size={11} /> Live</Badge>
-                          : <Badge tone="amber"><Clock size={11} /> In review</Badge>}
+                      )}
+                      <div className="p-5 md:p-6 pl-6">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-surface-2 border border-line text-text">
+                              {t.machine_id || '—'}
+                            </span>
+                            {!img && !vid && (
+                              <span className="text-[11px] font-semibold text-muted uppercase tracking-wide">Text only</span>
+                            )}
+                            {(t.created_at || t.submitted_at || t.timestamp) && (
+                              <span className="text-xs font-mono text-muted">
+                                {new Date(t.created_at || t.submitted_at || t.timestamp).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                          {live ? (
+                            <Badge tone="signal"><CheckCircle2 size={11} /> Live</Badge>
+                          ) : (
+                            <Badge tone="amber"><Clock size={11} /> In review</Badge>
+                          )}
+                        </div>
+                        <p className="text-[15px] md:text-base text-text leading-relaxed whitespace-pre-wrap">
+                          {t.text}
+                        </p>
+                        {(img || vid) && (
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {vid && (
+                              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-signal bg-signal/10 border border-signal/25 px-2.5 py-1 rounded-full">
+                                <Video size={12} /> Includes video
+                              </span>
+                            )}
+                            {img && (
+                              <button
+                                type="button"
+                                onClick={() => setLightboxSrc(img)}
+                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber bg-amber/10 border border-amber/25 px-2.5 py-1 rounded-full hover:bg-amber/20"
+                              >
+                                <ImageIcon size={12} /> View photo
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <p className="text-[15px] text-text leading-relaxed">{t.text}</p>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-            </Card>
+                    </motion.article>
+                  );
+                })}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

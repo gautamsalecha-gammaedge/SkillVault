@@ -10,7 +10,7 @@ import PageTransition from './PageTransition';
 import { Brand } from './WorkerLayout';
 
 const NAV = [
-  { to: '/admin', label: 'Analytics', icon: LayoutDashboard, end: true },
+  { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/admin/pending-workers', label: 'Pending Workers', icon: UserCheck },
   { to: '/admin/workers-machines', label: 'Workers & Machines', icon: Users },
   { to: '/admin/knowledge-review', label: 'Knowledge Review', icon: BookOpenText },

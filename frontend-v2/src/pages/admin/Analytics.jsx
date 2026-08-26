@@ -20,7 +20,7 @@ export default function AdminAnalytics() {
 
   return (
     <div>
-      <PageHeader eyebrow="Supervisor console" title="Analytics" description="A live pulse on the floor — questions, knowledge, tickets, people." />
+      <PageHeader eyebrow="Supervisor console" title="Dashboard" description="A live pulse on the floor — questions, knowledge, tickets, people." />
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatTile label="Questions asked" value={summary.total_questions} icon={HelpCircle} />
