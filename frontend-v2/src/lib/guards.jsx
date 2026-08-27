@@ -3,12 +3,28 @@ import { Navigate } from 'react-router-dom';
 import { getWorkerToken, getAdminToken, clearWorkerSession, clearAdminSession } from './auth';
 import { api } from './api';
 
+/** Max wait for session verify — never hang on "Checking session…" */
+const SESSION_CHECK_MS = 5000;
+
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('session_check_timeout')), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 /**
- * Worker routes:
- * - No token → login
- * - Token present → verify with GET /worker/profile
- * - Invalid/expired → clear session → login
- * Protected UI is not shown until the session is confirmed.
+ * Worker routes: verify token quickly (5s max), then ok or login.
+ * Never leaves the UI stuck on "Checking session…".
  */
 export function RequireWorker({ children }) {
   const hasToken = !!getWorkerToken();
@@ -22,14 +38,16 @@ export function RequireWorker({ children }) {
     let cancelled = false;
     (async () => {
       try {
-        await api.myProfile();
+        await withTimeout(api.myProfile(), SESSION_CHECK_MS);
         if (!cancelled) setStatus('ok');
       } catch (_) {
         clearWorkerSession();
         if (!cancelled) setStatus('deny');
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [hasToken]);
 
   if (status === 'deny') {
@@ -45,7 +63,7 @@ export function RequireWorker({ children }) {
   return children;
 }
 
-/** Admin routes — verify via GET /admin/profile. */
+/** Admin routes — same fast verify via GET /admin/profile. */
 export function RequireAdmin({ children }) {
   const hasToken = !!getAdminToken();
   const [status, setStatus] = useState(hasToken ? 'checking' : 'deny');
@@ -58,14 +76,16 @@ export function RequireAdmin({ children }) {
     let cancelled = false;
     (async () => {
       try {
-        await api.adminProfile();
+        await withTimeout(api.adminProfile(), SESSION_CHECK_MS);
         if (!cancelled) setStatus('ok');
       } catch (_) {
         clearAdminSession();
         if (!cancelled) setStatus('deny');
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [hasToken]);
 
   if (status === 'deny') {

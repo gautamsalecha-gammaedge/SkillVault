@@ -10,6 +10,36 @@ from datetime import datetime
 from db import Base
 
 
+class User(Base):
+    """
+    Single login identity (real-world standard).
+    Roles in user_roles: worker and/or supervisor.
+    Floor FKs still use workers.worker_id (same value as user_id for workers).
+    """
+    __tablename__ = "users"
+
+    user_id = Column(String, primary_key=True)
+    password_hash = Column(String, nullable=False)
+    name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    email_verified = Column(Boolean, nullable=False, default=False)
+    phone_country_code = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class UserRole(Base):
+    """Roles for a user: worker | supervisor (both allowed)."""
+    __tablename__ = "user_roles"
+    __table_args__ = (UniqueConstraint("user_id", "role", name="uq_user_role"),)
+
+    user_id = Column(String, ForeignKey("users.user_id"), primary_key=True)
+    role = Column(String, primary_key=True)  # worker | supervisor
+
+
 class Worker(Base):
     """One row per registered worker - their login ID, scrambled password, name, and approval status."""
     __tablename__ = "workers"

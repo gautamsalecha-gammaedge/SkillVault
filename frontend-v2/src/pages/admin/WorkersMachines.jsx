@@ -22,6 +22,13 @@ function phoneLine(w) {
 }
 
 export default function WorkersMachines() {
+  const [isOwner, setIsOwner] = useState(false);
+  useEffect(() => {
+    api.adminProfile()
+      .then((p) => setIsOwner(!!p.is_owner))
+      .catch(() => setIsOwner(false));
+  }, []);
+
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,11 +73,14 @@ export default function WorkersMachines() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount; toast is stable enough
+  }, []);
 
   useEffect(() => {
     load();
-  }, [load]);
+  // only on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selectedWorker = useMemo(
     () => workers.find((w) => w.worker_id === selectedId) || null,
@@ -156,7 +166,15 @@ export default function WorkersMachines() {
     setWorkers((list) =>
       list.map((w) => {
         if (w.worker_id === selectedId || w.worker_id === updated.worker_id) {
-          return { ...w, ...updated };
+          return {
+            ...w,
+            ...updated,
+            // explicit role flags so list badge cannot keep stale supervisor
+            is_supervisor: !!updated.is_supervisor,
+            is_worker: updated.is_worker !== undefined ? !!updated.is_worker : w.is_worker !== false,
+            is_owner: !!updated.is_owner,
+            roles: Array.isArray(updated.roles) ? updated.roles : (w.roles || []),
+          };
         }
         return w;
       }),
@@ -378,7 +396,10 @@ export default function WorkersMachines() {
                           <Badge tone="amber"><KeyRound size={11} /> Password reset</Badge>
                         )}
                         {w.is_approved ? (
-                          <Badge tone="signal">Approved</Badge>
+                          <>
+                            <Badge tone="signal">Approved</Badge>
+                            {w.is_supervisor ? <Badge tone="amber">Supervisor</Badge> : null}
+                          </>
                         ) : (
                           <Badge tone="amber">Unapproved</Badge>
                         )}
@@ -450,6 +471,8 @@ export default function WorkersMachines() {
               }
             }}
             toast={toast}
+            isOwner={isOwner}
+            onRefresh={() => load(true)}
           />
         )}
       </AnimatePresence>
@@ -467,6 +490,8 @@ function WorkerDrawer({
   onSaved,
   onApproved,
   toast,
+  isOwner = false,
+  onRefresh,
 }) {
   const [tab, setTab] = useState('profile'); // profile | machines
   const [name, setName] = useState(worker.name || '');
@@ -480,6 +505,8 @@ function WorkerDrawer({
   const [tempPassword, setTempPassword] = useState('');
   const [savingPw, setSavingPw] = useState(false);
   const [resetPending, setResetPending] = useState(false);
+  const [roleWorker, setRoleWorker] = useState(worker.is_worker !== false);
+  const [roleSupervisor, setRoleSupervisor] = useState(!!worker.is_supervisor);
 
   // Sync when switching workers
   useEffect(() => {
@@ -492,13 +519,15 @@ function WorkerDrawer({
     setMachineQuery('');
     setTempPassword('');
     setResetPending(false);
+    setRoleWorker(worker.is_worker !== false);
+    setRoleSupervisor(!!worker.is_supervisor);
     api.adminPasswordResetRequests('pending')
       .then((res) => {
         const list = res.requests || [];
         setResetPending(list.some((r) => r.worker_id === worker.worker_id));
       })
       .catch(() => setResetPending(false));
-  }, [worker.worker_id]);
+  }, [worker.worker_id, worker.is_supervisor, worker.is_worker]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -510,6 +539,10 @@ function WorkerDrawer({
 
   const save = async (e) => {
     e.preventDefault();
+    if (isOwner && !roleWorker && !roleSupervisor) {
+      toast.error('Select at least one role: Floor worker or Supervisor.');
+      return;
+    }
     setSaving(true);
     try {
       const body = {
@@ -522,6 +555,25 @@ function WorkerDrawer({
         body.new_worker_id = workerId.trim();
       }
       const res = await api.updateWorker(worker.worker_id, body);
+      let rolesMeta = {
+        is_worker: worker.is_worker !== false,
+        is_supervisor: !!worker.is_supervisor,
+        is_owner: !!worker.is_owner,
+        roles: worker.roles || [],
+      };
+      if (isOwner) {
+        const roleRes = await api.setWorkerRoles(
+          res.worker_id || body.new_worker_id || worker.worker_id,
+          roleWorker,
+          roleSupervisor,
+        );
+        rolesMeta = {
+          is_worker: !!roleRes.is_worker,
+          is_supervisor: !!roleRes.is_supervisor,
+          is_owner: !!roleRes.is_owner,
+          roles: roleRes.roles || [],
+        };
+      }
       const updated = {
         worker_id: res.worker_id || body.new_worker_id || worker.worker_id,
         name: body.name,
@@ -529,8 +581,13 @@ function WorkerDrawer({
         phone_number: body.phone_number || '',
         address: body.address || '',
         is_approved: worker.is_approved,
+        ...rolesMeta,
       };
       onSaved(updated);
+      // Re-sync list from server so Supervisor badge matches DB
+      if (typeof onRefresh === 'function') {
+        try { await onRefresh(); } catch { /* ignore */ }
+      }
       toast.success('Worker profile saved.');
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not save.');
@@ -672,6 +729,48 @@ function WorkerDrawer({
                   className="field-input resize-none"
                 />
               </Field>
+
+              <div className="mt-6 pt-5 border-t-2 border-line space-y-3">
+                <p className="text-[11px] font-mono uppercase tracking-wider text-muted">Access roles</p>
+                <p className="text-xs text-muted leading-relaxed">
+                  Choose how this login can sign in. Default is floor worker only. Dual access uses the same ID and password.
+                  {isOwner ? ' Only the plant owner can change these.' : ' Only the plant owner can change roles.'}
+                </p>
+                <div className="grid gap-2">
+                  <label className={`flex items-start gap-3 rounded-xl border-2 px-3 py-3 ${isOwner ? 'border-line bg-surface-2 cursor-pointer' : 'border-line/60 bg-surface-2/50 opacity-80'}`}>
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-line"
+                      checked={roleWorker}
+                      disabled={!isOwner}
+                      onChange={(e) => setRoleWorker(e.target.checked)}
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-text">Floor worker</span>
+                      <span className="block text-xs text-muted mt-0.5">Worker app — Ask, tips, safety, tickets, daily update</span>
+                    </span>
+                  </label>
+                  <label className={`flex items-start gap-3 rounded-xl border-2 px-3 py-3 ${isOwner ? 'border-line bg-surface-2 cursor-pointer' : 'border-line/60 bg-surface-2/50 opacity-80'}`}>
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-line"
+                      checked={roleSupervisor}
+                      disabled={!isOwner}
+                      onChange={(e) => setRoleSupervisor(e.target.checked)}
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-text">Supervisor</span>
+                      <span className="block text-xs text-muted mt-0.5">Admin console — reviews, machines, tickets</span>
+                      {worker.is_owner ? (
+                        <span className="inline-block mt-1 text-[10px] font-mono uppercase tracking-wider text-amber">Owner</span>
+                      ) : null}
+                    </span>
+                  </label>
+                </div>
+                {isOwner && !roleWorker && !roleSupervisor && (
+                  <p className="text-xs text-amber font-medium">Select at least one role before saving.</p>
+                )}
+              </div>
 
               <div className="mt-6 pt-5 border-t-2 border-line space-y-3">
                 <p className="text-[11px] font-mono uppercase tracking-wider text-muted">Password reset (supervisor)</p>

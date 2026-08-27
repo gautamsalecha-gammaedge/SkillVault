@@ -164,6 +164,23 @@ export const api = {
       auth: 'admin',
       body: { current_password, new_password, confirm_password },
     }),
+  createSupervisor: (username, password, name) =>
+    apiFetch('/admin/supervisors', {
+      method: 'POST',
+      auth: 'admin',
+      body: { username, password, name: name || null },
+    }),
+  setWorkerRoles: (worker_id, as_worker, as_supervisor) =>
+    apiFetch(`/admin/workers/${encodeURIComponent(worker_id)}/roles`, {
+      method: 'PUT',
+      auth: 'admin',
+      body: { as_worker: !!as_worker, as_supervisor: !!as_supervisor },
+    }),
+  promoteWorker: (worker_id) =>
+    apiFetch(`/admin/workers/${encodeURIComponent(worker_id)}/promote`, {
+      method: 'POST',
+      auth: 'admin',
+    }),
   updateWorker: (worker_id, data) => apiFetch(`/admin/workers/${encodeURIComponent(worker_id)}`, { method: 'PUT', auth: 'admin', body: data }),
 
   /* ---------------- Admin: worker approval ---------------- */

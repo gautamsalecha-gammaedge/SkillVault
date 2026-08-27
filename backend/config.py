@@ -17,9 +17,9 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 EMBEDDING_MODEL = "gemini-embedding-001"
 LLM_MODEL = "gemini-3.6-flash"
 
-# --- Admin credentials (single fixed admin, not a DB table) ---
-ADMIN_USERNAME = os.environ["ADMIN_USERNAME"]
-ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
+# # --- Admin credentials (single fixed admin, not a DB table) ---
+# ADMIN_USERNAME = os.environ["ADMIN_USERNAME"]
+# ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 
 # --- Sessions ---
 # How long a login token stays valid before the person has to log in again.

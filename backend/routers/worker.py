@@ -164,6 +164,12 @@ def worker_register(req: WorkerRegisterRequest, db: Session = Depends(get_db)):
     )
     db.add(new_worker)
     db.commit()
+    # Unified identity: users + worker role
+    try:
+        from auth.user_accounts import upsert_user_from_worker
+        upsert_user_from_worker(db, new_worker)
+    except Exception as e:
+        print(f"[SkillVault] user upsert on register: {e}")
 
     msg = "Registration received. An admin must approve your account before you can log in."
     if email and email_verified:
@@ -185,14 +191,34 @@ def worker_register(req: WorkerRegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login")
 def worker_login(req: WorkerLoginRequest, db: Session = Depends(get_db)):
-    """A worker logs in with their worker_id and password, and gets a token that expires after TOKEN_EXPIRY_HOURS.
-    Blocked with a 403 if the account hasn't been approved by an admin yet."""
+    """
+    Worker login via unified users + worker role.
+    Still requires workers.is_approved for floor access.
+    """
+    from auth.user_accounts import authenticate, ROLE_WORKER, upsert_user_from_worker
+
     worker = db.query(Worker).filter(Worker.worker_id == req.worker_id).first()
     if not worker:
         raise HTTPException(status_code=401, detail="Worker ID not found. Please register first.")
 
-    if not verify_password(req.password, worker.password_hash):
-        raise HTTPException(status_code=401, detail="Incorrect password.")
+    result = authenticate(db, req.worker_id, req.password)
+    if not result:
+        # Fallback: legacy hash on workers row only (create user once, keep roles)
+        if not verify_password(req.password, worker.password_hash):
+            raise HTTPException(status_code=401, detail="Incorrect password.")
+        from auth.user_accounts import _roles_of
+        upsert_user_from_worker(db, worker)
+        roles = _roles_of(db, worker.worker_id)
+        user_name = worker.name
+    else:
+        _user, roles = result
+        user_name = _user.name or worker.name
+
+    if ROLE_WORKER not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail="This account has no worker access. Use Admin sign-in if you are a supervisor.",
+        )
 
     if not worker.is_approved:
         raise HTTPException(status_code=403, detail="Your account is still waiting for admin approval.")
@@ -204,7 +230,9 @@ def worker_login(req: WorkerLoginRequest, db: Session = Depends(get_db)):
 
     return {
         "token": token,
-        "name": worker.name,
+        "name": user_name,
+        "worker_id": worker.worker_id,
+        "roles": roles if result else [ROLE_WORKER],
         "expires_in_hours": TOKEN_EXPIRY_HOURS,
         "message": "Login successful. Use this token in the Authorization header as 'Bearer <token>'.",
     }

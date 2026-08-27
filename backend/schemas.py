@@ -94,6 +94,13 @@ class AdminChangePasswordRequest(BaseModel):
     confirm_password: str
 
 
+class AdminCreateSupervisorRequest(BaseModel):
+    """POST /admin/supervisors — create supervisor-only account."""
+    username: str
+    password: str
+    name: Optional[str] = None
+
+
 class AdminUpdateWorkerRequest(BaseModel):
     """PUT /admin/workers/{worker_id} - admin editing a worker's profile.
     Every field optional; only the ones provided get changed. No password
@@ -217,3 +224,9 @@ class ForgotResetRequest(BaseModel):
 
 class AdminSetPasswordRequest(BaseModel):
     temporary_password: str
+
+
+class AdminSetRolesRequest(BaseModel):
+    """Owner sets floor worker / supervisor access for one account."""
+    as_worker: bool = True
+    as_supervisor: bool = False

@@ -31,6 +31,8 @@ from schemas import (
     AdminUpdateWorkerRequest,
     AdminSetPasswordRequest,
     AdminChangePasswordRequest,
+    AdminCreateSupervisorRequest,
+    AdminSetRolesRequest,
 )
 from auth.security import hash_password, verify_password, make_expiry_time
 from auth.admin_auth import require_admin
@@ -48,22 +50,38 @@ router = APIRouter(prefix="/admin",tags=["Admin"])
 @router.post("/login")
 def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
     """
-    Login against the admins table (bcrypt). If the table is empty, seeds
-    the first admin from ADMIN_USERNAME / ADMIN_PASSWORD in .env once.
+    Supervisor login via unified users + roles (supervisor role required).
+    Seeds first supervisor if none exist; migrates legacy admins/workers into users.
     """
-    ensure_seed_admin(db)
+    from auth.user_accounts import (
+        seed_first_supervisor_if_empty,
+        authenticate,
+        ROLE_SUPERVISOR,
+        migrate_all_identities,
+    )
+    from auth.admin_accounts import ensure_admin_schema
+
+    ensure_admin_schema(db)
+    seed_first_supervisor_if_empty(db)
+    migrate_all_identities(db)
+    from auth.user_accounts import ensure_at_least_one_owner
+    ensure_at_least_one_owner(db)
 
     username = (req.username or "").strip()
-    admin = db.query(Admin).filter(Admin.admin_id == username).first()
-    if not admin or not admin.is_active:
+    result = authenticate(db, username, req.password)
+    if not result:
         raise HTTPException(status_code=401, detail="Incorrect username or password.")
-    if not verify_password(req.password, admin.password_hash):
-        raise HTTPException(status_code=401, detail="Incorrect username or password.")
+    user, roles = result
+    if ROLE_SUPERVISOR not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail="This account is not a supervisor. Use Worker sign-in, or ask an admin to promote you.",
+        )
 
     token = secrets.token_hex(16)
     session = AdminSession(
         token=token,
-        admin_id=admin.admin_id,
+        admin_id=user.user_id,
         expires_at=make_expiry_time(),
     )
     db.add(session)
@@ -71,22 +89,103 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
 
     return {
         "token": token,
-        "name": admin.name or admin.admin_id,
-        "username": admin.admin_id,
+        "name": user.name or user.user_id,
+        "username": user.user_id,
+        "roles": roles,
         "expires_in_hours": TOKEN_EXPIRY_HOURS,
         "message": "Login successful. Use this token in the Authorization header as 'Bearer <token>'.",
     }
 
 
+@router.post("/supervisors")
+def create_supervisor_account(
+    req: AdminCreateSupervisorRequest,
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Create a supervisor-only account. Owner role required."""
+    from auth.user_accounts import create_supervisor, user_is_owner, ensure_at_least_one_owner
+    ensure_at_least_one_owner(db)
+    if not user_is_owner(db, admin["admin_id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the plant owner can create new supervisors. Ask the owner account.",
+        )
+    try:
+        return create_supervisor(
+            db,
+            username=req.username,
+            password=req.password,
+            name=req.name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/workers/{worker_id}/roles")
+def set_worker_roles(
+    worker_id: str,
+    req: AdminSetRolesRequest,
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Owner sets Floor worker / Supervisor checkboxes for one account."""
+    from auth.user_accounts import set_user_roles, user_is_owner, ensure_at_least_one_owner
+    ensure_at_least_one_owner(db)
+    if not user_is_owner(db, admin["admin_id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the plant owner can change worker / supervisor roles.",
+        )
+    try:
+        return set_user_roles(
+            db,
+            worker_id,
+            as_worker=bool(req.as_worker),
+            as_supervisor=bool(req.as_supervisor),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/workers/{worker_id}/promote")
+def promote_worker(
+    worker_id: str,
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Grant supervisor role to an existing worker. Owner only."""
+    from auth.user_accounts import (
+        promote_worker_to_supervisor,
+        user_is_owner,
+        ensure_at_least_one_owner,
+    )
+    ensure_at_least_one_owner(db)
+    if not user_is_owner(db, admin["admin_id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the plant owner can promote a worker to supervisor.",
+        )
+    try:
+        return promote_worker_to_supervisor(db, worker_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/profile")
 def get_admin_profile(admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
     """Logged-in admin profile from the admins table."""
+    from auth.user_accounts import user_is_owner, ensure_at_least_one_owner, _roles_of
+    ensure_at_least_one_owner(db)
     row = db.query(Admin).filter(Admin.admin_id == admin["admin_id"]).first()
     if not row:
         raise HTTPException(status_code=404, detail="Admin not found.")
+    roles = _roles_of(db, admin["admin_id"])
     return {
         "username": row.admin_id,
         "name": row.name,
+        "roles": roles,
+        "is_owner": user_is_owner(db, admin["admin_id"]),
     }
 
 
@@ -122,8 +221,8 @@ def admin_change_password(
         raise HTTPException(status_code=400, detail="New password must be at least 6 characters.")
     if req.new_password != req.confirm_password:
         raise HTTPException(status_code=400, detail="New password and confirmation do not match.")
-    row.password_hash = hash_password(new_pw)
-    db.commit()
+    from auth.user_accounts import set_password_for_user
+    set_password_for_user(db, admin["admin_id"], new_pw)
     return {"status": "password_updated", "message": "Password updated. Use it next time you sign in."}
 
 
@@ -243,20 +342,30 @@ def list_knowledge(
 def get_all_workers(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
     """Returns every registered worker, approved or not - used to populate
     the admin's worker list/dropdown when assigning machines."""
+    from auth.user_accounts import _roles_of, ensure_users_schema, ROLE_WORKER, ROLE_SUPERVISOR, ROLE_OWNER
+    ensure_users_schema(db)
     workers = db.query(Worker).all()
-    return {
-        "workers": [
-            {
-                "worker_id": w.worker_id,
-                "name": w.name,
-                "is_approved": w.is_approved,
-                "phone_country_code": w.phone_country_code,
-                "phone_number": w.phone_number,
-                "address": w.address,
-            }
-            for w in workers
-        ]
-    }
+    from auth.user_accounts import ensure_role
+    out = []
+    for w in workers:
+        roles = _roles_of(db, w.worker_id)
+        # Brand-new identity with zero roles → default floor worker once
+        if not roles:
+            ensure_role(db, w.worker_id, ROLE_WORKER)
+            roles = _roles_of(db, w.worker_id)
+        out.append({
+            "worker_id": w.worker_id,
+            "name": w.name,
+            "is_approved": w.is_approved,
+            "phone_country_code": w.phone_country_code,
+            "phone_number": w.phone_number,
+            "address": w.address,
+            "roles": roles,
+            "is_worker": ROLE_WORKER in roles,
+            "is_supervisor": ROLE_SUPERVISOR in roles,
+            "is_owner": ROLE_OWNER in roles,
+        })
+    return {"workers": out}
 
 @router.get("/pending")
 def get_pending(machine_id: str, authorized: bool = Depends(require_admin)):
