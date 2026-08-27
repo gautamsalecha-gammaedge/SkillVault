@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getWorkerName, getWorkerId, clearWorkerSession } from '../lib/auth';
+import { api } from '../lib/api';
 import PageTransition from './PageTransition';
 
 const NAV = [
@@ -14,10 +15,10 @@ const NAV = [
   { to: '/worker/ask', label: 'Ask AI', icon: MessageCircleQuestion },
   { to: '/worker/daily-update', label: 'Daily update', icon: NotebookPen },
   { to: '/worker/safety', label: 'Safety', icon: ShieldCheck },
-  { to: '/worker/my-tips', label: 'Tips', icon: ListChecks },
-  { to: '/worker/my-tickets', label: 'Tickets', icon: Ticket },
-  { to: '/worker/interview', label: 'Interview', icon: Mic2 },
-  { to: '/worker/settings', label: 'Profile', icon: Settings },
+  { to: '/worker/tips', label: 'Tips', icon: ListChecks },
+  { to: '/worker/tickets', label: 'Tickets', icon: Ticket },
+  { to: '/worker/interview-session', label: 'Interview session', icon: Mic2 },
+  { to: '/worker/profile', label: 'Profile', icon: Settings },
 ];
 
 const DEFAULT_WIDTH = 300;
@@ -48,7 +49,8 @@ export default function WorkerLayout() {
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef(false);
 
-  const logout = () => {
+  const logout = async () => {
+    try { await api.workerLogout(); } catch (_) { /* still clear local */ }
     clearWorkerSession();
     // replace so Forward cannot return to a protected page after sign-out
     nav('/login', { replace: true });

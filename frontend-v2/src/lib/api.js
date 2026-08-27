@@ -149,6 +149,8 @@ export const api = {
   /* ---------------- Auth ---------------- */
   workerRegister: (data) => apiFetch('/worker/register', { method: 'POST', body: data }),
   workerLogin: (worker_id, password) => apiFetch('/worker/login', { method: 'POST', body: { worker_id, password } }),
+  workerLogout: () => apiFetch('/worker/logout', { method: 'POST', auth: 'worker' }).catch(() => null),
+  adminLogout: () => apiFetch('/admin/logout', { method: 'POST', auth: 'admin' }).catch(() => null),
   adminLogin: (username, password) => apiFetch('/admin/login', { method: 'POST', body: { username, password } }),
 
   myMachines: () => apiFetch('/worker/my-machines', { auth: 'worker' }),

@@ -144,7 +144,8 @@ export default function AdminLayout() {
     return () => { cancelled = true; };
   }, [location.pathname]);
 
-  const logout = () => {
+  const logout = async () => {
+    try { await api.adminLogout(); } catch (_) { /* still clear local */ }
     clearAdminSession();
     nav('/login', { replace: true });
   };

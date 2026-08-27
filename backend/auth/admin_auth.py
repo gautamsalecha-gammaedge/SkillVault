@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from db import get_db
 from models import AdminSession, Admin
 from auth.security import bearer_scheme
+from auth.session_util import slide_session_expiry
 
 
 def require_admin(
@@ -46,7 +47,11 @@ def require_admin(
         db.commit()
         raise HTTPException(status_code=401, detail="Admin account not found or disabled. Please log in again.")
 
+    # Keep admin session alive while actively using the console
+    slide_session_expiry(session, db)
+
     return {
         "admin_id": admin.admin_id,
         "name": admin.name,
+        "token": token,
     }

@@ -68,6 +68,13 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
     ensure_at_least_one_owner(db)
 
     username = (req.username or "").strip()
+    from auth.rate_limit import check_rate_limit
+    check_rate_limit(
+        f"admin_login:{username.lower()}",
+        max_hits=10,
+        window_seconds=300,
+        detail="Too many login attempts. Wait 5 minutes and try again.",
+    )
     result = authenticate(db, username, req.password)
     if not result:
         raise HTTPException(status_code=401, detail="Incorrect username or password.")
@@ -95,6 +102,17 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
         "expires_in_hours": TOKEN_EXPIRY_HOURS,
         "message": "Login successful. Use this token in the Authorization header as 'Bearer <token>'.",
     }
+
+
+
+@router.post("/logout")
+def admin_logout(admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """Revoke current admin session token (Sign out)."""
+    tok = admin.get("token")
+    if tok:
+        db.query(AdminSession).filter(AdminSession.token == tok).delete()
+        db.commit()
+    return {"status": "logged_out", "message": "Session ended."}
 
 
 @router.post("/supervisors")
@@ -702,8 +720,8 @@ def admin_set_worker_password(
             detail="No pending password-reset request from this worker. They must use Forgot password → Ask supervisor first.",
         )
 
-    worker.password_hash = hash_password(pwd)
-    db.query(WorkerSession).filter(WorkerSession.worker_id == worker_id).delete()
+    from auth.user_accounts import set_password_for_user
+    set_password_for_user(db, worker_id, pwd)
     pending.status = "completed"
     pending.resolved_at = datetime.utcnow()
     pending.resolved_by = "admin"

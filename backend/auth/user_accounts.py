@@ -135,7 +135,7 @@ def migrate_all_identities(db: Session) -> None:
 
 
 def set_password_for_user(db: Session, user_id: str, plain: str) -> None:
-    """Update users + mirror to workers/admins rows if present."""
+    """Update users + mirror to workers/admins rows if present. Revokes all sessions."""
     h = hash_password(plain)
     u = db.query(User).filter(User.user_id == user_id).first()
     if u:
@@ -147,6 +147,11 @@ def set_password_for_user(db: Session, user_id: str, plain: str) -> None:
     if a:
         a.password_hash = h
     db.commit()
+    try:
+        from auth.session_util import revoke_all_sessions_for_user
+        revoke_all_sessions_for_user(db, user_id)
+    except Exception:
+        pass
 
 
 def authenticate(db: Session, user_id: str, password: str) -> tuple[User, list[str]] | None:

@@ -196,6 +196,13 @@ def worker_login(req: WorkerLoginRequest, db: Session = Depends(get_db)):
     Still requires workers.is_approved for floor access.
     """
     from auth.user_accounts import authenticate, ROLE_WORKER, upsert_user_from_worker
+    from auth.rate_limit import check_rate_limit
+    check_rate_limit(
+        f"worker_login:{(req.worker_id or '').strip().lower()}",
+        max_hits=10,
+        window_seconds=300,
+        detail="Too many login attempts. Wait 5 minutes and try again.",
+    )
 
     worker = db.query(Worker).filter(Worker.worker_id == req.worker_id).first()
     if not worker:
@@ -236,6 +243,18 @@ def worker_login(req: WorkerLoginRequest, db: Session = Depends(get_db)):
         "expires_in_hours": TOKEN_EXPIRY_HOURS,
         "message": "Login successful. Use this token in the Authorization header as 'Bearer <token>'.",
     }
+
+
+
+@router.post("/logout")
+def worker_logout(worker: dict = Depends(require_worker), db: Session = Depends(get_db)):
+    """Revoke current worker session token (Sign out)."""
+    from models import WorkerSession
+    tok = worker.get("token")
+    if tok:
+        db.query(WorkerSession).filter(WorkerSession.token == tok).delete()
+        db.commit()
+    return {"status": "logged_out", "message": "Session ended."}
 
 
 @router.get("/my-machines")
@@ -522,10 +541,9 @@ def forgot_reset(req: ForgotResetRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Code expired. Request a new one.")
 
     row.consumed = True
-    w.password_hash = hash_password(new_password)
-    # Invalidate existing sessions
-    db.query(WorkerSession).filter(WorkerSession.worker_id == wid).delete()
     db.commit()
+    from auth.user_accounts import set_password_for_user
+    set_password_for_user(db, wid, new_password)  # also revokes all sessions
     return {"status": "password_updated", "message": "Password updated. You can log in now."}
 
 
