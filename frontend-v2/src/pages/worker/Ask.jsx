@@ -642,15 +642,15 @@ export default function Ask() {
       ];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-130px)] lg:h-[calc(100vh-88px)] max-w-3xl mx-auto w-full">
+    <div className="flex flex-col h-[calc(100dvh-7.5rem)] sm:h-[calc(100vh-130px)] lg:h-[calc(100vh-88px)] max-w-3xl mx-auto w-full min-h-0">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 shrink-0">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-amber mb-0.5">Ask AI</p>
-          <h1 className="text-2xl font-semibold text-text">Ask the machine</h1>
-          <p className="text-sm text-muted mt-0.5">Answers from manuals & approved tips only — never a guess.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-3 sm:mb-4 shrink-0">
+        <div className="min-w-0">
+          <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-amber mb-0.5">Ask AI</p>
+          <h1 className="text-xl sm:text-2xl font-semibold text-text leading-tight">Ask the machine</h1>
+          <p className="text-xs sm:text-sm text-muted mt-0.5 leading-snug">Answers from manuals & approved tips only — never a guess.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           {thread.length > 0 && (
             <button
               type="button"
@@ -671,7 +671,7 @@ export default function Ask() {
             </button>
           )}
           {machines.length > 0 && (
-            <Select value={machineId} onChange={(e) => setMachineId(e.target.value)} className="min-w-[160px]">
+            <Select value={machineId} onChange={(e) => setMachineId(e.target.value)} className="min-w-0 flex-1 sm:flex-none sm:min-w-[160px]">
               {machines.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
@@ -691,21 +691,21 @@ export default function Ask() {
           {/* Thread */}
           <div className="flex-1 overflow-y-auto sv-scrollbar-none space-y-4 pr-1 min-h-0 pb-2">
             {thread.length === 0 && !asking && (
-              <Card className="p-6 border-2 border-line text-center">
-                <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-signal/15 border-2 border-signal/30 flex items-center justify-center text-signal">
-                  <Sparkles size={26} />
+              <Card className="p-4 sm:p-6 border-2 border-line text-center">
+                <div className="w-12 h-12 sm:w-14 sm:h-14 mx-auto mb-3 sm:mb-4 rounded-2xl bg-signal/15 border-2 border-signal/30 flex items-center justify-center text-signal">
+                  <Sparkles size={24} />
                 </div>
-                <h2 className="text-lg font-semibold text-text mb-1">How can I help on the floor?</h2>
-                <p className="text-sm text-muted mb-5 max-w-md mx-auto">
+                <h2 className="text-base sm:text-lg font-semibold text-text mb-1">How can I help on the floor?</h2>
+                <p className="text-xs sm:text-sm text-muted mb-4 sm:mb-5 max-w-md mx-auto leading-snug">
                   Speak or type a question about <span className="font-semibold text-text">{machineId}</span>.
                 </p>
-                <div className="flex flex-wrap justify-center gap-2">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap justify-center gap-2">
                   {suggestions.map((s) => (
                     <button
                       key={s}
                       type="button"
                       onClick={() => ask(s)}
-                      className="text-left text-sm px-3.5 py-2 rounded-xl border-2 border-line bg-surface-2 hover:border-amber hover:bg-amber/10 transition-colors max-w-xs"
+                      className="text-left text-sm px-3.5 py-2.5 sm:py-2 rounded-xl border-2 border-line bg-surface-2 hover:border-amber hover:bg-amber/10 transition-colors w-full sm:w-auto sm:max-w-xs"
                     >
                       {s}
                     </button>
@@ -973,7 +973,7 @@ export default function Ask() {
               </div>
             )}
 
-            <div className="flex items-end gap-3">
+            <div className="flex flex-col gap-2">
               <input
                 ref={imageInputRef}
                 type="file"
@@ -981,69 +981,86 @@ export default function Ask() {
                 className="hidden"
                 onChange={onImagePick}
               />
-              <button
-                type="button"
-                onClick={() => imageInputRef.current?.click()}
-                disabled={asking || listening || cameraOpen}
-                title="Upload a photo from files"
-                className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all disabled:opacity-50 ${
-                  imageFile && !cameraOpen
-                    ? 'border-amber bg-amber/15 text-amber'
-                    : 'border-line bg-surface-2 text-muted hover:border-amber hover:text-amber'
-                }`}
-              >
-                <ImageIcon size={20} />
-              </button>
-              <button
-                type="button"
-                onClick={() => (cameraOpen ? stopCamera() : openCamera())}
-                disabled={asking || listening}
-                title={cameraOpen ? 'Close camera' : 'Take a photo with camera'}
-                className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all disabled:opacity-50 ${
-                  cameraOpen
-                    ? 'border-amber bg-amber text-white'
-                    : 'border-line bg-surface-2 text-muted hover:border-amber hover:text-amber'
-                }`}
-              >
-                <Camera size={20} />
-              </button>
-              <button
-                type="button"
-                onClick={toggleMic}
-                disabled={asking || transcribing}
-                className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center shadow-md transition-all disabled:opacity-50 ${
-                  listening
-                    ? 'bg-danger text-white shadow-danger/25'
-                    : 'bg-signal text-white shadow-signal/20 hover:scale-105'
-                }`}
-              >
-                {transcribing ? (
-                  <Loader2 size={22} className="animate-spin" />
-                ) : listening ? (
-                  <Square size={18} />
-                ) : (
-                  <Mic size={22} />
-                )}
-              </button>
 
+              {/* Photo tools above the text line */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={asking || listening || cameraOpen}
+                  title="Upload a photo from files"
+                  aria-label="Upload photo"
+                  className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-full border-2 text-xs font-semibold transition-all disabled:opacity-50 ${
+                    imageFile && !cameraOpen
+                      ? 'border-amber bg-amber/15 text-amber'
+                      : 'border-line bg-surface-2 text-muted hover:border-amber hover:text-amber'
+                  }`}
+                >
+                  <ImageIcon size={15} />
+                  Gallery
+                </button>
+                <button
+                  type="button"
+                  onClick={() => (cameraOpen ? stopCamera() : openCamera())}
+                  disabled={asking || listening}
+                  title={cameraOpen ? 'Close camera' : 'Take a photo with camera'}
+                  aria-label={cameraOpen ? 'Close camera' : 'Open camera'}
+                  className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-full border-2 text-xs font-semibold transition-all disabled:opacity-50 ${
+                    cameraOpen
+                      ? 'border-amber bg-amber text-white'
+                      : 'border-line bg-surface-2 text-muted hover:border-amber hover:text-amber'
+                  }`}
+                >
+                  <Camera size={15} />
+                  {cameraOpen ? 'Close cam' : 'Camera'}
+                </button>
+                {(imageFile || cameraOpen) && (
+                  <span className="text-[11px] text-muted truncate">
+                    {cameraOpen ? 'Aim at the issue, then capture' : 'Photo attached'}
+                  </span>
+                )}
+              </div>
+
+              {/* Mic + text + send on one line */}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   ask(question);
                 }}
-                className="flex-1 flex items-center gap-2 min-w-0"
+                className="flex items-center gap-2 min-w-0"
               >
+                <button
+                  type="button"
+                  onClick={toggleMic}
+                  disabled={asking || transcribing}
+                  aria-label={listening ? 'Stop listening' : 'Speak'}
+                  title={listening ? 'Stop' : 'Speak question'}
+                  className={`shrink-0 w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center shadow-md transition-all disabled:opacity-50 ${
+                    listening
+                      ? 'bg-danger text-white shadow-danger/25'
+                      : 'bg-signal text-white shadow-signal/20 hover:scale-105'
+                  }`}
+                >
+                  {transcribing ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : listening ? (
+                    <Square size={16} />
+                  ) : (
+                    <Mic size={20} />
+                  )}
+                </button>
                 <input
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                   placeholder={listening ? 'Speak your question…' : 'Type or speak a question…'}
-                  className="flex-1 bg-surface-2 border-2 border-line rounded-2xl px-4 py-3.5 text-sm text-text outline-none focus:border-amber placeholder:text-muted"
+                  className="flex-1 min-w-0 bg-surface-2 border-2 border-line rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-[15px] sm:text-sm text-text outline-none focus:border-amber placeholder:text-muted"
                   disabled={asking}
                 />
                 <button
                   type="submit"
                   disabled={(!question.trim() && !imageFile) || asking || listening}
-                  className="w-12 h-12 rounded-full bg-amber text-white flex items-center justify-center disabled:opacity-40 shrink-0 shadow-md shadow-amber/20"
+                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-amber text-white flex items-center justify-center disabled:opacity-40 shrink-0 shadow-md shadow-amber/20"
+                  aria-label="Send"
                 >
                   <Send size={18} />
                 </button>
@@ -1083,8 +1100,8 @@ export default function Ask() {
               </div>
             )}
 
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted">
-              <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+            <div className="mt-2 flex flex-col xs:flex-row sm:flex-row sm:flex-wrap sm:items-center gap-1.5 sm:gap-3 text-xs text-muted">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer select-none shrink-0">
                 <input
                   type="checkbox"
                   checked={autoSpeak}
@@ -1093,8 +1110,10 @@ export default function Ask() {
                 />
                 Auto-play answers
               </label>
-              <span>
-                {listening ? 'Tap mic again when done' : 'Tap mic to ask by voice · gallery or camera for a photo of the issue'}
+              <span className="leading-snug">
+                {listening
+                  ? 'Tap Speak again when done'
+                  : 'Speak, type, or attach a photo of the issue'}
               </span>
             </div>
           </div>
