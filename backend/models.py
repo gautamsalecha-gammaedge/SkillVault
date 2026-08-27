@@ -25,6 +25,41 @@ class Worker(Base):
     phone_country_code = Column(String, nullable=True, default="+91")
     phone_number = Column(String, nullable=True)
     address = Column(Text, nullable=True)
+    # Optional contact email — must be OTP-verified before password reset by email
+    email = Column(String, nullable=True)
+    email_verified = Column(Boolean, nullable=False, default=False)
+
+
+class EmailOtp(Base):
+    """
+    Short-lived one-time codes for email verification and password reset.
+    purpose: "verify_email" | "reset_password"
+    """
+    __tablename__ = "email_otps"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String, nullable=False, index=True)
+    worker_id = Column(String, nullable=True, index=True)
+    purpose = Column(String, nullable=False)
+    code = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    consumed = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PasswordResetRequest(Base):
+    """
+    Worker asked supervisor to set a temporary password.
+    Admin may set a temp password only while status is pending.
+    """
+    __tablename__ = "password_reset_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    worker_id = Column(String, ForeignKey("workers.worker_id"), nullable=False, index=True)
+    status = Column(String, nullable=False, default="pending")  # pending | completed | cancelled
+    created_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_by = Column(String, nullable=True)  # admin label
 
 
 class AdminProfile(Base):

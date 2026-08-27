@@ -2,7 +2,7 @@
    SkillVault — API client (matches backend/routers/*.py exactly)
    ============================================================ */
 
-import { getWorkerToken, getAdminToken, forceWorkerLogout, forceAdminLogout } from './auth';
+import { getWorkerToken, getAdminToken, clearWorkerSession, clearAdminSession } from './auth';
 
 const API_BASE = localStorage.getItem('sv_api_base') || 'http://127.0.0.1:8000';
 export function getApiBase() { return API_BASE; }
@@ -36,9 +36,8 @@ async function apiFetch(path, opts = {}) {
     throw new ApiError(0, 'Network error — check the backend is running and reachable.');
   }
   if (res.status === 401 || res.status === 403) {
-    // Leave protected UI immediately — do not keep browsing with a dead token
-    if (auth === 'admin') forceAdminLogout();
-    if (auth === 'worker') forceWorkerLogout();
+    if (auth === 'admin') clearAdminSession();
+    if (auth === 'worker') clearWorkerSession();
   }
   const contentType = res.headers.get('content-type') || '';
   let data = null;
@@ -85,7 +84,7 @@ function xhr(path, form, { method = 'POST', authKind = 'worker', onProgress } = 
       if (req.status >= 200 && req.status < 300) resolve(data);
       else {
         if (req.status === 401 || req.status === 403) {
-          if (authKind === 'admin') forceAdminLogout(); else forceWorkerLogout();
+          if (authKind === 'admin') clearAdminSession(); else clearWorkerSession();
         }
         reject(new ApiError(req.status, (data && data.detail) || 'Something went wrong. Please try again.'));
       }
@@ -278,6 +277,24 @@ export const api = {
     const qs = params.toString();
     return apiFetch(qs ? `/admin/daily-updates?${qs}` : '/admin/daily-updates', { auth: 'admin' });
   },
+
+
+  /* ---------------- Email OTP / password recovery ---------------- */
+  sendEmailOtp: (data) => apiFetch('/worker/email/send-otp', { method: 'POST', body: data }),
+  verifyEmailOtp: (data) => apiFetch('/worker/email/verify-otp', { method: 'POST', body: data }),
+  forgotLookup: (worker_id) => apiFetch('/worker/forgot/lookup', { method: 'POST', body: { worker_id } }),
+  forgotSendOtp: (worker_id) => apiFetch('/worker/forgot/send-otp', { method: 'POST', body: { worker_id } }),
+  forgotReset: (data) => apiFetch('/worker/forgot/reset', { method: 'POST', body: data }),
+  forgotRequestAdmin: (worker_id) =>
+    apiFetch('/worker/forgot/request-admin', { method: 'POST', body: { worker_id } }),
+  adminPasswordResetRequests: (status = 'pending') =>
+    apiFetch(`/admin/password-reset-requests?status=${encodeURIComponent(status)}`, { auth: 'admin' }),
+  adminSetWorkerPassword: (worker_id, temporary_password) =>
+    apiFetch(`/admin/workers/${encodeURIComponent(worker_id)}/password`, {
+      method: 'PUT',
+      auth: 'admin',
+      body: { temporary_password },
+    }),
 
   createTicket: (data) => apiFetch('/tickets', { method: 'POST', auth: 'worker', body: data }),
   myTickets: () => apiFetch('/tickets/my', { auth: 'worker' }),

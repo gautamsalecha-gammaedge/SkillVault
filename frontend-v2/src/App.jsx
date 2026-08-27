@@ -4,6 +4,7 @@ import { RequireWorker, RequireAdmin } from './lib/guards';
 import Landing from './pages/public/Landing';
 import Login from './pages/public/Login';
 import Register from './pages/public/Register';
+import ForgotPassword from './pages/public/ForgotPassword';
 
 import WorkerLayout from './components/WorkerLayout';
 import AdminLayout from './components/AdminLayout';
@@ -34,6 +35,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
 
       <Route path="/worker" element={<RequireWorker><WorkerLayout /></RequireWorker>}>
         <Route index element={<Overview />} />

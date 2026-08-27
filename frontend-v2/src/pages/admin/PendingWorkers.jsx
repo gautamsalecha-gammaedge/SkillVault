@@ -7,6 +7,7 @@ import {
 import { api, ApiError } from '../../lib/api';
 import { PageHeader, FullPageLoader, EmptyState, Card, Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
+import { markPendingWorkersSeen } from '../../components/AdminLayout';
 
 function initials(name = '') {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
@@ -39,8 +40,11 @@ export default function PendingWorkers() {
     else setLoading(true);
     try {
       const r = await api.pendingWorkers();
-      setWorkers(r.pending_workers || []);
+      const list = r.pending_workers || [];
+      setWorkers(list);
       setSelected(new Set());
+      // Visiting this page clears the sidebar alert for the current queue
+      markPendingWorkersSeen(list.map((w) => w.worker_id));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not load pending workers.');
     } finally {

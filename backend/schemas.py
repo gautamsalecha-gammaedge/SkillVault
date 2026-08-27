@@ -59,6 +59,8 @@ class WorkerRegisterRequest(BaseModel):
     phone_country_code: str = "+91"
     phone_number: Optional[str] = None
     address: Optional[str] = None
+    email: Optional[str] = None
+    email_verified: Optional[bool] = False
 
 
 class WorkerLoginRequest(BaseModel):
@@ -75,6 +77,7 @@ class WorkerProfileUpdateRequest(BaseModel):
     phone_country_code: Optional[str] = None
     phone_number: Optional[str] = None
     address: Optional[str] = None
+    email: Optional[str] = None
     current_password: Optional[str] = None
     new_password: Optional[str] = None
 
@@ -180,3 +183,31 @@ class SubmitDailyUpdateRequest(BaseModel):
     optimized_text: str
     machine_id: Optional[str] = None
     report_date: Optional[str] = None  # YYYY-MM-DD; defaults to today UTC if omitted
+
+
+# ---------- Email OTP / password recovery ----------
+class SendEmailOtpRequest(BaseModel):
+    email: str
+    purpose: str  # verify_email | reset_password
+    worker_id: Optional[str] = None
+
+
+class VerifyEmailOtpRequest(BaseModel):
+    email: str
+    code: str
+    purpose: str
+    worker_id: Optional[str] = None
+
+
+class ForgotLookupRequest(BaseModel):
+    worker_id: str
+
+
+class ForgotResetRequest(BaseModel):
+    worker_id: str
+    code: str
+    new_password: str
+
+
+class AdminSetPasswordRequest(BaseModel):
+    temporary_password: str

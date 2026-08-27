@@ -22,9 +22,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from rag.embeddings import embed_text_with_retry
 from db import get_db
-from models import AdminSession, AdminProfile, Worker, WorkerSession, WorkerMachine, Ticket, QuestionLog, InterviewSession, SafetyCompletion
-from schemas import AdminLoginRequest, AssignMachineRequest, EditEntryRequest, AdminProfileUpdateRequest, AdminUpdateWorkerRequest
-from auth.security import make_expiry_time
+from models import AdminSession, AdminProfile, Worker, WorkerSession, WorkerMachine, Ticket, QuestionLog, InterviewSession, SafetyCompletion, PasswordResetRequest
+from schemas import AdminLoginRequest, AssignMachineRequest, EditEntryRequest, AdminProfileUpdateRequest, AdminUpdateWorkerRequest, AdminSetPasswordRequest
+from auth.security import hash_password, make_expiry_time
 from auth.admin_auth import require_admin
 from rag.chroma_store import collection , list_manuals, delete_manual , list_all_machine_ids
 from config import ADMIN_USERNAME, ADMIN_PASSWORD, TOKEN_EXPIRY_HOURS
@@ -348,6 +348,8 @@ def admin_update_worker(
                 phone_country_code=final_country_code,
                 phone_number=final_phone,
                 address=final_address,
+                email=getattr(worker, "email", None),
+                email_verified=bool(getattr(worker, "email_verified", False)),
             )
             db.add(new_worker)
             db.flush()  # new row must exist before children are re-pointed at it
@@ -514,3 +516,93 @@ def edit_entry(entry_id: str, req: EditEntryRequest, authorized: bool = Depends(
     collection.update(ids=[entry_id], documents=[text], embeddings=[embedding])
 
     return {"status": "edited", "id": entry_id, "text": text}
+
+@router.put("/workers/{worker_id}/password")
+def admin_set_worker_password(
+    worker_id: str,
+    req: AdminSetPasswordRequest,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Set a temporary password ONLY if this worker has a pending
+    forgot-password request (supervisor path). Share the password offline.
+    """
+    from models import WorkerSession, PasswordResetRequest
+    from datetime import datetime
+
+    pwd = (req.temporary_password or "").strip()
+    if len(pwd) < 6:
+        raise HTTPException(status_code=400, detail="Temporary password must be at least 6 characters.")
+    worker = db.query(Worker).filter(Worker.worker_id == worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found.")
+
+    pending = (
+        db.query(PasswordResetRequest)
+        .filter(
+            PasswordResetRequest.worker_id == worker_id,
+            PasswordResetRequest.status == "pending",
+        )
+        .order_by(PasswordResetRequest.id.desc())
+        .first()
+    )
+    if not pending:
+        raise HTTPException(
+            status_code=400,
+            detail="No pending password-reset request from this worker. They must use Forgot password → Ask supervisor first.",
+        )
+
+    worker.password_hash = hash_password(pwd)
+    db.query(WorkerSession).filter(WorkerSession.worker_id == worker_id).delete()
+    pending.status = "completed"
+    pending.resolved_at = datetime.utcnow()
+    pending.resolved_by = "admin"
+    db.commit()
+    return {
+        "status": "password_set",
+        "worker_id": worker_id,
+        "message": "Temporary password set. Share it with the worker securely. Their reset request is closed.",
+    }
+
+
+@router.get("/password-reset-requests")
+def list_password_reset_requests(
+    status: str = "pending",
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Pending (or all) password reset requests from workers."""
+    from models import PasswordResetRequest, Worker
+    from sqlalchemy import text as sql_text
+    try:
+        db.execute(sql_text("""
+            CREATE TABLE IF NOT EXISTS password_reset_requests (
+                id SERIAL PRIMARY KEY,
+                worker_id VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TIMESTAMP,
+                resolved_by VARCHAR
+            )
+        """))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    q = db.query(PasswordResetRequest)
+    if status and status != "all":
+        q = q.filter(PasswordResetRequest.status == status)
+    rows = q.order_by(PasswordResetRequest.created_at.desc()).limit(200).all()
+    out = []
+    for r in rows:
+        w = db.query(Worker).filter(Worker.worker_id == r.worker_id).first()
+        out.append({
+            "id": r.id,
+            "worker_id": r.worker_id,
+            "name": w.name if w else None,
+            "status": r.status,
+            "created_at": r.created_at.isoformat() + "Z" if r.created_at else None,
+            "resolved_at": r.resolved_at.isoformat() + "Z" if r.resolved_at else None,
+        })
+    return {"requests": out}

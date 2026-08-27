@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getAdminName, clearAdminSession } from '../lib/auth';
+import { api } from '../lib/api';
 import PageTransition from './PageTransition';
 import { Brand } from './WorkerLayout';
 
@@ -23,6 +24,35 @@ const NAV = [
 
 const DEFAULT_WIDTH = 300;
 const MIN_WIDTH = 220;
+
+/** IDs the admin has already opened on Pending Workers (this browser). */
+const SEEN_PENDING_KEY = 'sv_admin_pending_workers_seen_ids';
+
+function readSeenPendingIds() {
+  try {
+    const raw = localStorage.getItem(SEEN_PENDING_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeSeenPendingIds(ids) {
+  try {
+    localStorage.setItem(SEEN_PENDING_KEY, JSON.stringify([...ids].map(String)));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Call when admin opens Pending Workers — clears nav alert for current queue. */
+export function markPendingWorkersSeen(workerIds) {
+  const set = readSeenPendingIds();
+  (workerIds || []).forEach((id) => set.add(String(id)));
+  writeSeenPendingIds(set);
+}
 
 function maxSidebarWidth() {
   if (typeof window === 'undefined') return 400;
@@ -43,13 +73,79 @@ export default function AdminLayout() {
   const nav = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [passwordResetCount, setPasswordResetCount] = useState(0);
+  /** Unseen pending registrations (not yet opened on Pending Workers page). */
+  const [unseenPendingCount, setUnseenPendingCount] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef(false);
 
+  // Password-reset requests (stay highlighted while pending)
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () => {
+      api.adminPasswordResetRequests?.('pending')
+        ?.then((res) => {
+          if (!cancelled) setPasswordResetCount((res.requests || []).length);
+        })
+        .catch(() => {
+          if (!cancelled) setPasswordResetCount(0);
+        });
+    };
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [location.pathname]);
+
+  // Pending workers: amber only until admin visits that page
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () => {
+      api.pendingWorkers()
+        .then((res) => {
+          if (cancelled) return;
+          const list = res.pending_workers || res.workers || [];
+          const ids = list.map((w) => String(w.worker_id ?? w.id ?? '')).filter(Boolean);
+          const seen = readSeenPendingIds();
+          // Drop seen IDs that are no longer pending (approved/rejected)
+          const stillPendingSeen = new Set([...seen].filter((id) => ids.includes(id)));
+          if (stillPendingSeen.size !== seen.size) writeSeenPendingIds(stillPendingSeen);
+          const unseen = ids.filter((id) => !stillPendingSeen.has(id));
+          setUnseenPendingCount(unseen.length);
+        })
+        .catch(() => {
+          if (!cancelled) setUnseenPendingCount(0);
+        });
+    };
+    tick();
+    const id = setInterval(tick, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [location.pathname]);
+
+  // Visiting Pending Workers marks current queue as seen → nav back to normal
+  useEffect(() => {
+    if (location.pathname !== '/admin/pending-workers') return;
+    let cancelled = false;
+    api.pendingWorkers()
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.pending_workers || res.workers || [];
+        const ids = list.map((w) => String(w.worker_id ?? w.id ?? '')).filter(Boolean);
+        markPendingWorkersSeen(ids);
+        setUnseenPendingCount(0);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [location.pathname]);
+
   const logout = () => {
     clearAdminSession();
-    // replace so Forward cannot return to a protected page after sign-out
     nav('/login', { replace: true });
   };
 
@@ -90,7 +186,12 @@ export default function AdminLayout() {
           background: 'linear-gradient(180deg, #ebe4d8 0%, #e5ddd0 50%, #dfd6c8 100%)',
         }}
       >
-        <SidebarContent name={name} logout={logout} />
+        <SidebarContent
+          name={name}
+          logout={logout}
+          passwordResetCount={passwordResetCount}
+          unseenPendingCount={unseenPendingCount}
+        />
         <div
           onMouseDown={onResizeStart}
           className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize z-20 group hover:bg-amber/40 active:bg-amber/50 transition-colors"
@@ -118,7 +219,13 @@ export default function AdminLayout() {
               className="fixed left-0 top-0 h-screen w-[300px] z-50 lg:hidden flex flex-col border-r-2 border-line"
               style={{ background: 'linear-gradient(180deg, #ebe4d8 0%, #e5ddd0 100%)' }}
             >
-              <SidebarContent name={name} logout={logout} onNavigate={() => setMobileOpen(false)} />
+              <SidebarContent
+                name={name}
+                logout={logout}
+                onNavigate={() => setMobileOpen(false)}
+                passwordResetCount={passwordResetCount}
+                unseenPendingCount={unseenPendingCount}
+              />
             </motion.aside>
           </>
         )}
@@ -147,7 +254,13 @@ export default function AdminLayout() {
   );
 }
 
-function SidebarContent({ name, logout, onNavigate }) {
+function SidebarContent({
+  name,
+  logout,
+  onNavigate,
+  passwordResetCount = 0,
+  unseenPendingCount = 0,
+}) {
   return (
     <>
       <div className="px-6 py-7 border-b-2 border-line/80 flex items-center justify-between gap-2">
@@ -158,34 +271,58 @@ function SidebarContent({ name, logout, onNavigate }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-2 sv-scrollbar-none">
-        {NAV.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              `flex items-center gap-4 px-5 py-4 rounded-xl text-base font-semibold transition-all relative ${
-                isActive
-                  ? 'bg-surface text-amber shadow-sm border-2 border-line'
-                  : 'text-text/75 hover:text-text hover:bg-surface/70 border-2 border-transparent'
-              }`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <motion.span
-                    layoutId="admin-nav-dot"
-                    className="absolute left-0 top-2 bottom-2 w-1 rounded-full bg-amber"
+        {NAV.map((item) => {
+          const isResetAlert = item.to === '/admin/workers-machines' && passwordResetCount > 0;
+          const isPendingAlert = item.to === '/admin/pending-workers' && unseenPendingCount > 0;
+          const isAlert = isResetAlert || isPendingAlert;
+          const badgeCount = isResetAlert
+            ? passwordResetCount
+            : isPendingAlert
+              ? unseenPendingCount
+              : 0;
+
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                `flex items-center gap-4 px-5 py-4 rounded-xl text-base font-semibold transition-all relative ${
+                  isActive
+                    ? isAlert
+                      ? 'bg-amber/15 text-amber shadow-sm border-2 border-amber'
+                      : 'bg-surface text-amber shadow-sm border-2 border-line'
+                    : isAlert
+                      ? 'text-amber bg-amber/10 border-2 border-amber/50 hover:bg-amber/15'
+                      : 'text-text/75 hover:text-text hover:bg-surface/70 border-2 border-transparent'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <motion.span
+                      layoutId="admin-nav-dot"
+                      className="absolute left-0 top-2 bottom-2 w-1 rounded-full bg-amber"
+                    />
+                  )}
+                  <item.icon
+                    size={24}
+                    strokeWidth={isActive || isAlert ? 2.25 : 1.75}
+                    className="shrink-0"
                   />
-                )}
-                <item.icon size={24} strokeWidth={isActive ? 2.25 : 1.75} className="shrink-0" />
-                <span className="leading-tight">{item.label}</span>
-              </>
-            )}
-          </NavLink>
-        ))}
+                  <span className="leading-tight flex-1">{item.label}</span>
+                  {badgeCount > 0 && (
+                    <span className="min-w-[1.35rem] h-5 px-1.5 rounded-full bg-amber text-white text-[11px] font-bold flex items-center justify-center tabular-nums">
+                      {badgeCount > 9 ? '9+' : badgeCount}
+                    </span>
+                  )}
+                </>
+              )}
+            </NavLink>
+          );
+        })}
       </nav>
 
       <div className="p-5 border-t-2 border-line/80">

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, X, Plus, Pencil, Search, RefreshCw, Factory, Phone, MapPin,
-  Check, UserCheck, UserX, Filter, ChevronRight, Save,
+  Check, UserCheck, UserX, Filter, ChevronRight, Save, KeyRound, Bell,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { PageHeader, FullPageLoader, Card, Badge, Button } from '../../components/ui';
@@ -27,6 +27,7 @@ export default function WorkersMachines() {
   const [refreshing, setRefreshing] = useState(false);
   const [workers, setWorkers] = useState([]);
   const [machines, setMachines] = useState([]);
+  const [resetRequestIds, setResetRequestIds] = useState(() => new Set()); // worker_ids with pending password reset
   const [assignments, setAssignments] = useState({});
   const [selectedId, setSelectedId] = useState(null); // drawer worker_id
   const [query, setQuery] = useState('');
@@ -38,10 +39,16 @@ export default function WorkersMachines() {
     if (silent) setRefreshing(true);
     else setLoading(true);
     try {
-      const [w, m] = await Promise.all([api.allWorkers(), api.allMachines()]);
+      const [w, m, resets] = await Promise.all([
+        api.allWorkers(),
+        api.allMachines(),
+        api.adminPasswordResetRequests('pending').catch(() => ({ requests: [] })),
+      ]);
       const list = w.workers || [];
       setWorkers(list);
       setMachines(m.machine_ids || []);
+      const pendingIds = new Set((resets.requests || []).map((r) => r.worker_id));
+      setResetRequestIds(pendingIds);
       const entries = await Promise.all(
         list.map(async (wk) => {
           try {
@@ -74,14 +81,22 @@ export default function WorkersMachines() {
     const approved = workers.filter((w) => w.is_approved).length;
     const unapproved = workers.length - approved;
     const unassigned = workers.filter((w) => !(assignments[w.worker_id] || []).length).length;
-    return { total: workers.length, approved, unapproved, unassigned, machines: machines.length };
-  }, [workers, assignments, machines]);
+    return {
+      total: workers.length,
+      approved,
+      unapproved,
+      unassigned,
+      machines: machines.length,
+      passwordResets: resetRequestIds.size,
+    };
+  }, [workers, assignments, machines, resetRequestIds]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = workers;
     if (statusFilter === 'approved') list = list.filter((w) => w.is_approved);
     if (statusFilter === 'unapproved') list = list.filter((w) => !w.is_approved);
+    if (statusFilter === 'reset') list = list.filter((w) => resetRequestIds.has(w.worker_id));
     if (machineFilter === 'assigned') list = list.filter((w) => (assignments[w.worker_id] || []).length > 0);
     if (machineFilter === 'unassigned') list = list.filter((w) => !(assignments[w.worker_id] || []).length);
     if (q) {
@@ -95,6 +110,10 @@ export default function WorkersMachines() {
       });
     }
     list = [...list].sort((a, b) => {
+      // Password-reset requesters always float to the top
+      const ar = resetRequestIds.has(a.worker_id) ? 0 : 1;
+      const br = resetRequestIds.has(b.worker_id) ? 0 : 1;
+      if (ar !== br) return ar - br;
       if (sortBy === 'id') return String(a.worker_id).localeCompare(String(b.worker_id));
       if (sortBy === 'machines') {
         const da = (assignments[a.worker_id] || []).length;
@@ -104,7 +123,7 @@ export default function WorkersMachines() {
       return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
     });
     return list;
-  }, [workers, query, statusFilter, machineFilter, sortBy, assignments]);
+  }, [workers, query, statusFilter, machineFilter, sortBy, assignments, resetRequestIds]);
 
   const assign = async (workerId, machineId) => {
     if (!machineId) return;
@@ -164,18 +183,63 @@ export default function WorkersMachines() {
         description="Manage who is on the floor and which machines they can access. Open a worker for full profile and assignment controls."
       />
 
+      {/* Password reset attention banner */}
+      {stats.passwordResets > 0 && (
+        <div className="mb-5 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border-2 border-amber bg-gradient-to-r from-amber/15 to-amber/5 px-4 py-3.5">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-10 h-10 rounded-xl bg-amber text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Bell size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-text text-sm sm:text-base">
+                {stats.passwordResets} worker{stats.passwordResets === 1 ? '' : 's'} waiting for a password reset
+              </p>
+              <p className="text-xs sm:text-sm text-muted">
+                They used Forgot password → Ask supervisor. Highlighted rows are at the top of the list — open the worker to set a temporary password.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            {statusFilter === 'reset' ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setStatusFilter('all')}
+              >
+                Show all workers
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="amber"
+                size="sm"
+                onClick={() => setStatusFilter('reset')}
+              >
+                Show only requests
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         {[
           { label: 'Workers', value: stats.total, icon: Users, tone: 'signal' },
           { label: 'Approved', value: stats.approved, icon: UserCheck, tone: 'signal' },
           { label: 'Unapproved', value: stats.unapproved, icon: UserX, tone: 'amber' },
+          { label: 'Password resets', value: stats.passwordResets, icon: KeyRound, tone: 'amber', alert: stats.passwordResets > 0 },
           { label: 'No machines', value: stats.unassigned, icon: Factory, tone: 'muted' },
           { label: 'Machines', value: stats.machines, icon: Factory, tone: 'signal' },
         ].map((s) => (
           <div
             key={s.label}
-            className="rounded-2xl border-2 border-line bg-surface p-4 flex items-center gap-3"
+            className={`rounded-2xl border-2 p-4 flex items-center gap-3 ${
+              s.alert
+                ? 'border-amber bg-amber/10 shadow-sm shadow-amber/10'
+                : 'border-line bg-surface'
+            }`}
           >
             <div
               className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
@@ -195,6 +259,21 @@ export default function WorkersMachines() {
           </div>
         ))}
       </div>
+
+      {statusFilter === 'reset' && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-amber bg-amber/10 text-amber font-semibold">
+            Viewing password-reset requests only
+          </span>
+          <button
+            type="button"
+            className="text-sm font-semibold text-signal hover:underline"
+            onClick={() => setStatusFilter('all')}
+          >
+            Clear filter · show all
+          </button>
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="flex flex-col xl:flex-row gap-3 mb-5">
@@ -262,6 +341,7 @@ export default function WorkersMachines() {
       ) : (
         <div className="space-y-3">
           {filtered.map((w, i) => {
+            const needsReset = resetRequestIds.has(w.worker_id);
             const assigned = assignments[w.worker_id] || [];
             const phone = phoneLine(w);
             const active = selectedId === w.worker_id;
@@ -275,19 +355,28 @@ export default function WorkersMachines() {
                 <button
                   type="button"
                   onClick={() => setSelectedId(w.worker_id)}
-                  className={`w-full text-left rounded-2xl border-2 bg-surface p-4 sm:p-5 transition-all hover:shadow-md hover:-translate-y-0.5 ${
-                    active
-                      ? 'border-signal ring-2 ring-signal/20 shadow-md'
-                      : 'border-line hover:border-signal/40'
+                  className={`w-full text-left rounded-2xl border-2 p-4 sm:p-5 transition-all hover:shadow-md hover:-translate-y-0.5 ${
+                    needsReset
+                      ? 'border-amber bg-amber/10 ring-2 ring-amber/25 shadow-md shadow-amber/10'
+                      : active
+                        ? 'border-signal bg-surface ring-2 ring-signal/20 shadow-md'
+                        : 'border-line bg-surface hover:border-signal/40'
                   }`}
                 >
                   <div className="flex items-start gap-3 sm:gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-signal/20 to-amber/10 border-2 border-line flex items-center justify-center font-display font-bold text-signal text-sm shrink-0">
-                      {initials(w.name)}
+                    <div className={`w-12 h-12 rounded-2xl border-2 flex items-center justify-center font-display font-bold text-sm shrink-0 ${
+                      needsReset
+                        ? 'bg-amber/20 border-amber/40 text-amber'
+                        : 'bg-gradient-to-br from-signal/20 to-amber/10 border-line text-signal'
+                    }`}>
+                      {needsReset ? <KeyRound size={20} /> : initials(w.name)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2 mb-0.5">
                         <p className="font-display font-bold text-lg leading-tight truncate">{w.name}</p>
+                        {needsReset && (
+                          <Badge tone="amber"><KeyRound size={11} /> Password reset</Badge>
+                        )}
                         {w.is_approved ? (
                           <Badge tone="signal">Approved</Badge>
                         ) : (
@@ -388,6 +477,9 @@ function WorkerDrawer({
   const [saving, setSaving] = useState(false);
   const [machineQuery, setMachineQuery] = useState('');
   const [busyMachine, setBusyMachine] = useState(null);
+  const [tempPassword, setTempPassword] = useState('');
+  const [savingPw, setSavingPw] = useState(false);
+  const [resetPending, setResetPending] = useState(false);
 
   // Sync when switching workers
   useEffect(() => {
@@ -398,6 +490,14 @@ function WorkerDrawer({
     setAddress(worker.address || '');
     setTab('profile');
     setMachineQuery('');
+    setTempPassword('');
+    setResetPending(false);
+    api.adminPasswordResetRequests('pending')
+      .then((res) => {
+        const list = res.requests || [];
+        setResetPending(list.some((r) => r.worker_id === worker.worker_id));
+      })
+      .catch(() => setResetPending(false));
   }, [worker.worker_id]);
 
   useEffect(() => {
@@ -572,6 +672,56 @@ function WorkerDrawer({
                   className="field-input resize-none"
                 />
               </Field>
+
+              <div className="mt-6 pt-5 border-t-2 border-line space-y-3">
+                <p className="text-[11px] font-mono uppercase tracking-wider text-muted">Password reset (supervisor)</p>
+                {resetPending ? (
+                  <>
+                    <p className="text-xs rounded-xl border border-amber/40 bg-amber/10 text-amber px-3 py-2 font-semibold">
+                      Pending request from this worker — you may set a temporary password.
+                    </p>
+                    <p className="text-xs text-muted leading-relaxed">
+                      Share the temp password with them offline. They sign in, then change it under Profile. The request closes after you set it.
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        value={tempPassword}
+                        onChange={(e) => setTempPassword(e.target.value)}
+                        placeholder="Min 6 characters"
+                        className="flex-1 rounded-xl border-2 border-line bg-surface px-3 py-2.5 text-sm outline-none focus:border-amber"
+                      />
+                      <Button
+                        type="button"
+                        variant="amber"
+                        loading={savingPw}
+                        disabled={tempPassword.trim().length < 6}
+                        onClick={async () => {
+                          setSavingPw(true);
+                          try {
+                            await api.adminSetWorkerPassword(worker.worker_id, tempPassword.trim());
+                            toast.success('Temporary password set. Share it with the worker.');
+                            setTempPassword('');
+                            setResetPending(false);
+                            if (typeof onResetResolved === 'function') onResetResolved(worker.worker_id);
+                          } catch (err) {
+                            toast.error(err instanceof ApiError ? err.message : 'Could not set password.');
+                          } finally {
+                            setSavingPw(false);
+                          }
+                        }}
+                      >
+                        Set temp password
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted leading-relaxed">
+                    No pending reset request. The worker must open <strong>Forgot password → Ask supervisor → Send request</strong> before you can set a temporary password.
+                  </p>
+                )}
+              </div>
+
               <style>{`
                 .field-input {
                   width: 100%;

@@ -205,11 +205,18 @@ export default function Login() {
                 <Input label="Worker ID" placeholder="W101" value={workerId} onChange={(e) => setWorkerId(e.target.value)} required />
                 <Input label="Password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 <Button type="submit" size="lg" className="w-full mt-1" loading={loading}>Sign in</Button>
-                <p className="text-center text-[15px] text-muted pt-2">
-                  New here?{' '}
-                  <Link to="/register" className="text-[var(--color-signal)] font-semibold hover:underline">
-                    Register as a worker
-                  </Link>
+                <p className="text-center text-[15px] text-muted pt-2 space-y-1">
+                  <span className="block">
+                    <Link to="/forgot-password" className="text-amber font-semibold hover:underline">
+                      Forgot password?
+                    </Link>
+                  </span>
+                  <span className="block">
+                    New here?{' '}
+                    <Link to="/register" className="text-[var(--color-signal)] font-semibold hover:underline">
+                      Register as a worker
+                    </Link>
+                  </span>
                 </p>
               </form>
             ) : (

@@ -39,7 +39,13 @@ export default function Register() {
     phone_country_code: '+91',
     phone_number: '',
     address: '',
+    email: '',
   });
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [devOtp, setDevOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -71,6 +77,8 @@ export default function Register() {
         phone_country_code: form.phone_country_code,
         phone_number: form.phone_number,
         address: form.address,
+        email: form.email.trim() || null,
+        email_verified: emailVerified && !!form.email.trim(),
       };
       const res = await api.workerRegister(payload);
       setResult(res);
@@ -258,6 +266,76 @@ export default function Register() {
                 <Input label="Phone (optional)" value={form.phone_number} onChange={set('phone_number')} />
               </div>
               <Input label="Address (optional)" value={form.address} onChange={set('address')} />
+              <div className="space-y-2">
+                <Input
+                  label="Email (optional)"
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => {
+                    setEmailVerified(false);
+                    setOtpSent(false);
+                    set('email')(e);
+                  }}
+                  placeholder="For Worker ID notice & password reset"
+                />
+                {form.email.trim() && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      loading={otpLoading}
+                      disabled={emailVerified}
+                      onClick={async () => {
+                        setOtpLoading(true);
+                        setDevOtp('');
+                        try {
+                          const res = await api.sendEmailOtp({ email: form.email.trim(), purpose: 'verify_email' });
+                          setOtpSent(true);
+                          if (res.dev_otp) setDevOtp(res.dev_otp);
+                          toast.success(res.mailed ? 'Code sent to your email.' : 'Dev code shown below (mail off).');
+                        } catch (err) {
+                          toast.error(err instanceof ApiError ? err.message : 'Could not send code.');
+                        } finally {
+                          setOtpLoading(false);
+                        }
+                      }}
+                    >
+                      {emailVerified ? 'Verified' : 'Send verify code'}
+                    </Button>
+                    {emailVerified && <span className="text-xs font-semibold text-signal">Email verified</span>}
+                  </div>
+                )}
+                {otpSent && !emailVerified && (
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div className="flex-1 min-w-[120px]">
+                      <Input label="OTP code" value={otp} onChange={(e) => setOtp(e.target.value)} />
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await api.verifyEmailOtp({
+                            email: form.email.trim(),
+                            code: otp.trim(),
+                            purpose: 'verify_email',
+                          });
+                          setEmailVerified(true);
+                          toast.success('Email verified.');
+                        } catch (err) {
+                          toast.error(err instanceof ApiError ? err.message : 'Invalid code.');
+                        }
+                      }}
+                    >
+                      Verify
+                    </Button>
+                  </div>
+                )}
+                {devOtp && !emailVerified && (
+                  <p className="text-xs text-amber">Dev OTP: <strong>{devOtp}</strong></p>
+                )}
+              </div>
               <Button
                 type="submit"
                 size="lg"
