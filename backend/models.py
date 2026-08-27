@@ -62,15 +62,26 @@ class PasswordResetRequest(Base):
     resolved_by = Column(String, nullable=True)  # admin label
 
 
+class Admin(Base):
+    """
+    Supervisor account stored in Postgres (not .env).
+    Password is bcrypt-hashed. First admin is seeded once from
+    ADMIN_USERNAME / ADMIN_PASSWORD in .env when the table is empty.
+    """
+    __tablename__ = "admins"
+
+    admin_id = Column(String, primary_key=True)  # login username
+    password_hash = Column(String, nullable=False)
+    name = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AdminProfile(Base):
     """
-    Editable display profile for the admin account. Login credentials
-    (ADMIN_USERNAME / ADMIN_PASSWORD) stay fixed in .env - this table
-    only stores the display name, so it can be updated from the app
-    without ever touching the login password. Keyed by username so it
-    still lines up if ADMIN_USERNAME is ever rotated. Row is created
-    lazily on first PUT /admin/profile (or read as "no name set yet"
-    on GET before that).
+    Legacy display-name table. Prefer Admin.name going forward.
+    Kept so older DBs do not break; new code reads/writes Admin.
     """
     __tablename__ = "admin_profiles"
 
@@ -93,10 +104,11 @@ class WorkerSession(Base):
 
 
 class AdminSession(Base):
-    """One row per active admin login."""
+    """One row per active admin login. admin_id links to admins.admin_id."""
     __tablename__ = "admin_sessions"
 
     token = Column(String, primary_key=True)
+    admin_id = Column(String, nullable=True, index=True)  # nullable for migration of old rows
     expires_at = Column(DateTime, nullable=False)
 
 

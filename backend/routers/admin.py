@@ -22,12 +22,21 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from rag.embeddings import embed_text_with_retry
 from db import get_db
-from models import AdminSession, AdminProfile, Worker, WorkerSession, WorkerMachine, Ticket, QuestionLog, InterviewSession, SafetyCompletion, PasswordResetRequest
-from schemas import AdminLoginRequest, AssignMachineRequest, EditEntryRequest, AdminProfileUpdateRequest, AdminUpdateWorkerRequest, AdminSetPasswordRequest
-from auth.security import hash_password, make_expiry_time
+from models import Admin, AdminSession, AdminProfile, Worker, WorkerSession, WorkerMachine, Ticket, QuestionLog, InterviewSession, SafetyCompletion, PasswordResetRequest
+from schemas import (
+    AdminLoginRequest,
+    AssignMachineRequest,
+    EditEntryRequest,
+    AdminProfileUpdateRequest,
+    AdminUpdateWorkerRequest,
+    AdminSetPasswordRequest,
+    AdminChangePasswordRequest,
+)
+from auth.security import hash_password, verify_password, make_expiry_time
 from auth.admin_auth import require_admin
+from auth.admin_accounts import ensure_seed_admin
 from rag.chroma_store import collection , list_manuals, delete_manual , list_all_machine_ids
-from config import ADMIN_USERNAME, ADMIN_PASSWORD, TOKEN_EXPIRY_HOURS
+from config import TOKEN_EXPIRY_HOURS
 
 import tempfile
 import os
@@ -38,53 +47,84 @@ router = APIRouter(prefix="/admin",tags=["Admin"])
 
 @router.post("/login")
 def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
-    if req.username != ADMIN_USERNAME or req.password != ADMIN_PASSWORD:
+    """
+    Login against the admins table (bcrypt). If the table is empty, seeds
+    the first admin from ADMIN_USERNAME / ADMIN_PASSWORD in .env once.
+    """
+    ensure_seed_admin(db)
+
+    username = (req.username or "").strip()
+    admin = db.query(Admin).filter(Admin.admin_id == username).first()
+    if not admin or not admin.is_active:
+        raise HTTPException(status_code=401, detail="Incorrect username or password.")
+    if not verify_password(req.password, admin.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect username or password.")
 
     token = secrets.token_hex(16)
-    session = AdminSession(token=token, expires_at=make_expiry_time())
+    session = AdminSession(
+        token=token,
+        admin_id=admin.admin_id,
+        expires_at=make_expiry_time(),
+    )
     db.add(session)
     db.commit()
 
-    profile = db.query(AdminProfile).filter(AdminProfile.username == ADMIN_USERNAME).first()
-
     return {
         "token": token,
-        "name": profile.name if profile else None,
+        "name": admin.name or admin.admin_id,
+        "username": admin.admin_id,
         "expires_in_hours": TOKEN_EXPIRY_HOURS,
         "message": "Login successful. Use this token in the Authorization header as 'Bearer <token>'.",
     }
 
 
 @router.get("/profile")
-def get_admin_profile(authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    """Returns the admin's own editable display name. There's a single fixed
-    admin account (login credentials live in .env), so this is always keyed
-    off ADMIN_USERNAME rather than anything from the request."""
-    profile = db.query(AdminProfile).filter(AdminProfile.username == ADMIN_USERNAME).first()
+def get_admin_profile(admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """Logged-in admin profile from the admins table."""
+    row = db.query(Admin).filter(Admin.admin_id == admin["admin_id"]).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Admin not found.")
     return {
-        "username": ADMIN_USERNAME,
-        "name": profile.name if profile else None,
+        "username": row.admin_id,
+        "name": row.name,
     }
 
 
 @router.put("/profile")
 def update_admin_profile(
     req: AdminProfileUpdateRequest,
-    authorized: bool = Depends(require_admin),
+    admin: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Admin updates their own display name. Login credentials (username/password)
-    are fixed in .env and are never editable through this endpoint."""
-    profile = db.query(AdminProfile).filter(AdminProfile.username == ADMIN_USERNAME).first()
-    if profile:
-        profile.name = req.name
-    else:
-        profile = AdminProfile(username=ADMIN_USERNAME, name=req.name)
-        db.add(profile)
+    """Update display name (not login username)."""
+    row = db.query(Admin).filter(Admin.admin_id == admin["admin_id"]).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Admin not found.")
+    row.name = (req.name or "").strip() or row.name
     db.commit()
+    return {"status": "updated", "username": row.admin_id, "name": row.name}
 
-    return {"status": "updated", "username": ADMIN_USERNAME, "name": profile.name}
+
+@router.post("/change-password")
+def admin_change_password(
+    req: AdminChangePasswordRequest,
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Logged-in admin sets a new password (must know the current one)."""
+    row = db.query(Admin).filter(Admin.admin_id == admin["admin_id"]).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Admin not found.")
+    if not verify_password(req.current_password, row.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+    new_pw = (req.new_password or "").strip()
+    if len(new_pw) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters.")
+    if req.new_password != req.confirm_password:
+        raise HTTPException(status_code=400, detail="New password and confirmation do not match.")
+    row.password_hash = hash_password(new_pw)
+    db.commit()
+    return {"status": "password_updated", "message": "Password updated. Use it next time you sign in."}
 
 
 def _entry_from_chroma(entry_id, document, meta):

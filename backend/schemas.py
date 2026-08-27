@@ -83,9 +83,15 @@ class WorkerProfileUpdateRequest(BaseModel):
 
 
 class AdminProfileUpdateRequest(BaseModel):
-    """PUT /admin/profile - admin editing their own display name.
-    No password field - login credentials are never editable here."""
+    """PUT /admin/profile - admin editing their own display name."""
     name: str
+
+
+class AdminChangePasswordRequest(BaseModel):
+    """POST /admin/change-password — logged-in admin."""
+    current_password: str
+    new_password: str
+    confirm_password: str
 
 
 class AdminUpdateWorkerRequest(BaseModel):

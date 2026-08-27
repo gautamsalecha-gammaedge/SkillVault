@@ -158,6 +158,12 @@ export const api = {
 
   adminProfile: () => apiFetch('/admin/profile', { auth: 'admin' }),
   updateAdminProfile: (name) => apiFetch('/admin/profile', { method: 'PUT', auth: 'admin', body: { name } }),
+  changeAdminPassword: (current_password, new_password, confirm_password) =>
+    apiFetch('/admin/change-password', {
+      method: 'POST',
+      auth: 'admin',
+      body: { current_password, new_password, confirm_password },
+    }),
   updateWorker: (worker_id, data) => apiFetch(`/admin/workers/${encodeURIComponent(worker_id)}`, { method: 'PUT', auth: 'admin', body: data }),
 
   /* ---------------- Admin: worker approval ---------------- */
