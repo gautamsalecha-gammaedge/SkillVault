@@ -2,7 +2,7 @@
    SkillVault — API client (matches backend/routers/*.py exactly)
    ============================================================ */
 
-import { getWorkerToken, getAdminToken, clearWorkerSession, clearAdminSession } from './auth';
+import { getWorkerToken, getAdminToken, forceWorkerLogout, forceAdminLogout } from './auth';
 
 const API_BASE = localStorage.getItem('sv_api_base') || 'http://127.0.0.1:8000';
 export function getApiBase() { return API_BASE; }
@@ -36,8 +36,9 @@ async function apiFetch(path, opts = {}) {
     throw new ApiError(0, 'Network error — check the backend is running and reachable.');
   }
   if (res.status === 401 || res.status === 403) {
-    if (auth === 'admin') clearAdminSession();
-    if (auth === 'worker') clearWorkerSession();
+    // Leave protected UI immediately — do not keep browsing with a dead token
+    if (auth === 'admin') forceAdminLogout();
+    if (auth === 'worker') forceWorkerLogout();
   }
   const contentType = res.headers.get('content-type') || '';
   let data = null;
@@ -84,7 +85,7 @@ function xhr(path, form, { method = 'POST', authKind = 'worker', onProgress } = 
       if (req.status >= 200 && req.status < 300) resolve(data);
       else {
         if (req.status === 401 || req.status === 403) {
-          if (authKind === 'admin') clearAdminSession(); else clearWorkerSession();
+          if (authKind === 'admin') forceAdminLogout(); else forceWorkerLogout();
         }
         reject(new ApiError(req.status, (data && data.detail) || 'Something went wrong. Please try again.'));
       }

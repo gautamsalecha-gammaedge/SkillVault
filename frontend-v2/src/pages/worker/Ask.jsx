@@ -18,6 +18,7 @@ export default function Ask() {
   const [machines, setMachines] = useState([]);
   const [machineId, setMachineId] = useState('');
   const [question, setQuestion] = useState('');
+  const textareaRef = useRef(null);
   // Per-worker + per-machine threads for this browser tab session only
   const workerId = getWorkerId() || '';
   const [thread, setThread] = useState([]);
@@ -26,6 +27,22 @@ export default function Ask() {
   const threadsByMachineRef = useRef({});
   const activeMachineRef = useRef('');
   const ownerRef = useRef(workerId);
+
+  // ChatGPT-style: grow the box with content, then scroll inside
+  const resizeComposer = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const max = 160; // ~6–7 lines, then scrollbar
+    const next = Math.min(el.scrollHeight, max);
+    el.style.height = `${Math.max(44, next)}px`;
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+  }, []);
+
+  useEffect(() => {
+    resizeComposer();
+  }, [question, resizeComposer]);
+
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [lightboxSrc, setLightboxSrc] = useState(null);
@@ -1027,7 +1044,7 @@ export default function Ask() {
                   e.preventDefault();
                   ask(question);
                 }}
-                className="flex items-center gap-2 min-w-0"
+                className="flex items-end gap-2 min-w-0"
               >
                 <button
                   type="button"
@@ -1049,12 +1066,24 @@ export default function Ask() {
                     <Mic size={20} />
                   )}
                 </button>
-                <input
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  placeholder={listening ? 'Speak your question…' : 'Type or speak a question…'}
-                  className="flex-1 min-w-0 bg-surface-2 border-2 border-line rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-[15px] sm:text-sm text-text outline-none focus:border-amber placeholder:text-muted"
+                  onKeyDown={(e) => {
+                    // Enter → send · Shift+Enter → new line (ChatGPT-style)
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if ((!question.trim() && !imageFile) || asking || listening) return;
+                      ask(question);
+                    }
+                  }}
+                  placeholder={listening ? 'Speak your question…' : 'Type a question…'}
+                  className="flex-1 min-w-0 resize-none bg-surface-2 border-2 border-line rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-[15px] sm:text-sm text-text outline-none focus:border-amber placeholder:text-muted leading-relaxed max-h-40"
+                  style={{ minHeight: 44 }}
                   disabled={asking}
+                  aria-label="Question"
                 />
                 <button
                   type="submit"
@@ -1113,7 +1142,7 @@ export default function Ask() {
               <span className="leading-snug">
                 {listening
                   ? 'Tap Speak again when done'
-                  : 'Speak, type, or attach a photo of the issue'}
+                  : 'Enter to send · Shift+Enter new line · mic or photo optional'}
               </span>
             </div>
           </div>

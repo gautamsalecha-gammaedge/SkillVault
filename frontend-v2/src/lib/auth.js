@@ -106,3 +106,27 @@ export function clearAdminSession() {
     localStorage.removeItem(A_NAME);
   } catch (_) {}
 }
+/**
+ * Server rejected the token (expired / invalid) or session check failed.
+ * Clear storage and leave protected UI immediately so a dead session
+ * cannot keep the shell open after reload.
+ */
+export function forceWorkerLogout() {
+  clearWorkerSession();
+  try {
+    const path = window.location.pathname || '';
+    if (path.startsWith('/worker')) {
+      window.location.replace('/login');
+    }
+  } catch (_) {}
+}
+
+export function forceAdminLogout() {
+  clearAdminSession();
+  try {
+    const path = window.location.pathname || '';
+    if (path.startsWith('/admin')) {
+      window.location.replace('/login');
+    }
+  } catch (_) {}
+}
