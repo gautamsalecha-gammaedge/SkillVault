@@ -26,12 +26,19 @@ router = APIRouter(prefix="/Knowledge", tags=["Knowledge"])
 @router.post("/add-knowledge/check")
 def check_knowledge(req: CheckKnowledgeRequest, worker: dict = Depends(require_worker)):
     """
-    Reviews a tip BEFORE it's stored.
-    Currently text-only. Video/image understanding happens on final submit.
+    Reviews a tip BEFORE it's stored (text only).
+    Video/image understanding happens on final submit.
+    Allows up to 3 clarifying cross-question rounds; after that forces complete.
     """
-    result = review_knowledge(req.text, req.machine_id, req.language_code)
+    result = review_knowledge(
+        req.text,
+        req.machine_id,
+        req.language_code,
+        round=getattr(req, "round", 1) or 1,
+    )
 
-    if req.round >= 2:
+    # Hard cap: after 3 follow-up rounds, accept whatever we have
+    if (req.round or 1) >= 3:
         result["complete"] = True
         result["question"] = None
 

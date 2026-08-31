@@ -1,16 +1,13 @@
 """
 rag/llm_provider.py
 
-Single entry point for text generation - tries Gemini first, falls back
-to Groq if Gemini fails (rate limit, timeout, outage). Used by both
-/ask's answer generation and the knowledge completeness check, so a
-Gemini hiccup doesn't block either flow.
+Text generation entry point for Ask, tip review, interview, daily polish.
 
-Does NOT apply to embeddings (embed_text in rag/embeddings.py) - those
-stay on Gemini only. Switching embedding providers mid-flight would
-produce vectors from a different vector space, which would silently
-break search (wrong results) rather than fail loudly - much worse than
-a text-generation hiccup.
+  PRIMARY  = Groq  (fast)
+  FALLBACK = Gemini (LLM_MODEL from config)
+
+Embeddings stay in rag/embeddings.py (Gemini only).
+Image/video stay in image_understanding.py / video_understanding.py (Gemini LLM_MODEL).
 """
 
 import requests
@@ -27,37 +24,43 @@ def _generate_with_gemini(prompt: str) -> str:
 
 
 def _generate_with_groq(prompt: str) -> str:
+    if not (GROQ_API_KEY or "").strip():
+        raise RuntimeError("GROQ_API_KEY is not set in .env")
     response = requests.post(
         GROQ_URL,
         headers={
-            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Authorization": f"Bearer {GROQ_API_KEY.strip()}",
             "Content-Type": "application/json",
         },
         json={
             "model": GROQ_MODEL,
             "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
         },
-        timeout=30,
+        timeout=45,
     )
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(
+            f"Groq HTTP {response.status_code} model={GROQ_MODEL!r}: {response.text[:400]}"
+        )
     data = response.json()
     return data["choices"][0]["message"]["content"]
 
 
 def generate_text(prompt: str) -> str:
-    """
-    Tries Gemini first. If it raises any error, falls back to Groq
-    (only if GROQ_API_KEY is configured). If both fail - or Groq isn't
-    configured - raises an error describing what happened.
-    """
+    """Groq first; Gemini fallback if Groq fails or key missing."""
+    groq_error = None
+    if (GROQ_API_KEY or "").strip():
+        try:
+            return _generate_with_groq(prompt)
+        except Exception as e:
+            groq_error = e
+            print(f"[llm] Groq failed, falling back to Gemini: {e}")
     try:
         return _generate_with_gemini(prompt)
     except Exception as gemini_error:
-        if not GROQ_API_KEY:
-            raise RuntimeError(f"Gemini failed and no Groq fallback is configured: {gemini_error}")
-        try:
-            return _generate_with_groq(prompt)
-        except Exception as groq_error:
+        if groq_error is not None:
             raise RuntimeError(
-                f"Both LLM providers failed. Gemini: {gemini_error}. Groq: {groq_error}"
+                f"Both LLM providers failed. Groq: {groq_error}. Gemini: {gemini_error}"
             )
+        raise RuntimeError(f"Gemini failed and Groq is not configured: {gemini_error}")

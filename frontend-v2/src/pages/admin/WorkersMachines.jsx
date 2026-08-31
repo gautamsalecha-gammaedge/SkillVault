@@ -52,15 +52,30 @@ export default function WorkersMachines() {
         api.adminPasswordResetRequests('pending').catch(() => ({ requests: [] })),
       ]);
       const list = w.workers || [];
+      // Machines that still exist in the knowledge base (Chroma).
+      // Assignments to deleted machines are treated as orphans and cleaned up.
+      const knownMachines = m.machine_ids || [];
+      const knownSet = new Set(knownMachines);
       setWorkers(list);
-      setMachines(m.machine_ids || []);
+      setMachines(knownMachines);
       const pendingIds = new Set((resets.requests || []).map((r) => r.worker_id));
       setResetRequestIds(pendingIds);
       const entries = await Promise.all(
         list.map(async (wk) => {
           try {
             const r = await api.workerMachines(wk.worker_id);
-            return [wk.worker_id, r.machine_ids || []];
+            const assigned = r.machine_ids || [];
+            const valid = assigned.filter((id) => knownSet.has(id));
+            const orphans = assigned.filter((id) => !knownSet.has(id));
+            // Auto-unassign deleted machines so the UI and DB stay in sync
+            if (orphans.length) {
+              await Promise.all(
+                orphans.map((mid) =>
+                  api.unassignMachine(wk.worker_id, mid).catch(() => null),
+                ),
+              );
+            }
+            return [wk.worker_id, valid];
           } catch {
             return [wk.worker_id, []];
           }

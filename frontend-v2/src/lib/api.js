@@ -18,6 +18,26 @@ export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+/** Avoid spamming toasts / multiple redirects when many requests 401 at once. */
+let _authRedirecting = false;
+
+function handleAuthFailure(auth) {
+  if (auth === 'admin') clearAdminSession();
+  if (auth === 'worker') clearWorkerSession();
+  if (_authRedirecting) return;
+  _authRedirecting = true;
+  try {
+    const path = (typeof window !== 'undefined' && window.location && window.location.pathname) || '';
+    const onLogin = path === '/login' || path.startsWith('/login');
+    if (!onLogin && typeof window !== 'undefined') {
+      // Full navigation clears in-flight page state and stops toast spam
+      window.location.assign('/login');
+    }
+  } catch (_) {
+    _authRedirecting = false;
+  }
+}
+
 async function apiFetch(path, opts = {}) {
   const { method = 'GET', body, auth = null, isForm = false } = opts;
   const headers = {};
@@ -36,14 +56,19 @@ async function apiFetch(path, opts = {}) {
     throw new ApiError(0, 'Network error — check the backend is running and reachable.');
   }
   if (res.status === 401 || res.status === 403) {
-    if (auth === 'admin') clearAdminSession();
-    if (auth === 'worker') clearWorkerSession();
+    if (auth === 'admin' || auth === 'worker') {
+      handleAuthFailure(auth);
+    }
   }
   const contentType = res.headers.get('content-type') || '';
   let data = null;
   if (contentType.includes('application/json')) data = await res.json().catch(() => null);
   if (!res.ok) {
     const message = (data && data.detail) || 'Something went wrong. Please try again.';
+    // Prefer a clear session message; page will redirect to login
+    if (res.status === 401 || res.status === 403) {
+      throw new ApiError(res.status, 'Session expired. Redirecting to login…');
+    }
     throw new ApiError(res.status, typeof message === 'string' ? message : JSON.stringify(message));
   }
   return data;
@@ -84,9 +109,11 @@ function xhr(path, form, { method = 'POST', authKind = 'worker', onProgress } = 
       if (req.status >= 200 && req.status < 300) resolve(data);
       else {
         if (req.status === 401 || req.status === 403) {
-          if (authKind === 'admin') clearAdminSession(); else clearWorkerSession();
+          if (authKind === 'admin' || authKind === 'worker') handleAuthFailure(authKind);
+          reject(new ApiError(req.status, 'Session expired. Redirecting to login…'));
+        } else {
+          reject(new ApiError(req.status, (data && data.detail) || 'Something went wrong. Please try again.'));
         }
-        reject(new ApiError(req.status, (data && data.detail) || 'Something went wrong. Please try again.'));
       }
     };
     req.onerror = () => reject(new ApiError(0, 'Network error — check your connection and try again.'));

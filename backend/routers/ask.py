@@ -30,18 +30,48 @@ router = APIRouter()
 
 
 def _assert_machine_assignment(db: Session, worker_id: str, machine_id: str):
+    """
+    Ensure the worker is assigned to this machine AND the machine still
+    exists in the knowledge base. Gives a clear, user-friendly message
+    instead of a raw backend error when the machine was deleted.
+    """
+    from rag.chroma_store import list_all_machine_ids
+
+    mid = (machine_id or "").strip()
+    if not mid:
+        raise HTTPException(status_code=400, detail="Please select a machine.")
+
+    known = set(list_all_machine_ids())
+    if mid not in known:
+        # Clean orphan assignment if any
+        db.query(WorkerMachine).filter(
+            WorkerMachine.worker_id == worker_id,
+            WorkerMachine.machine_id == mid,
+        ).delete(synchronize_session=False)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Machine '{mid}' is no longer available (it may have been removed by a supervisor). "
+                "Refresh the page and pick another machine, or contact your supervisor."
+            ),
+        )
+
     assignment = (
         db.query(WorkerMachine)
         .filter(
             WorkerMachine.worker_id == worker_id,
-            WorkerMachine.machine_id == machine_id,
+            WorkerMachine.machine_id == mid,
         )
         .first()
     )
     if not assignment:
         raise HTTPException(
             status_code=403,
-            detail="You are not assigned to this machine. Contact admin.",
+            detail="You are not assigned to this machine. Contact your supervisor.",
         )
 
 

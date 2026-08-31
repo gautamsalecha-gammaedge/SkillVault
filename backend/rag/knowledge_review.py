@@ -1,79 +1,92 @@
 """
 rag/knowledge_review.py
 
-Before a worker's tip gets stored, this does two things in a single
-model call (to keep cost/latency down):
+Before a worker's tip is stored, one model call does:
 
-1. COMPLETENESS - decides if the tip is specific enough that another
-   worker reading it later would know both the situation AND what to
-   do, without a follow-up question. Only flags it incomplete if
-   something genuinely important is missing - biased toward NOT asking
-   when the tip is already reasonably clear.
+1. COMPLETENESS — is this tip specific enough for another worker on this
+   machine (situation + what to do / what to watch for)?
+2. CROSS-QUESTION — if incomplete, ask ONE sharp, tip-specific question
+   (not a generic "please add more detail").
+3. POLISH — light grammar only; never change facts.
 
-2. POLISH - lightly cleans up grammar/spelling/clarity only. Never
-   changes, adds, or removes facts - a tip that's specific to one
-   worker's machine or process stays exactly as true or false as they
-   said it. This is wording cleanup, not fact-checking.
-
-The round cap (max clarifying rounds) is enforced by the caller
-(routers/knowledge.py), not here - this function always just reports
-what the model thinks; routers/knowledge.py decides whether to listen.
-
-Language: the worker's spoken/written language is now detected
-up front by Sarvam STT (voice/stt.py) at the point of recording, and
-passed in here as language_code - the LLM is no longer asked to guess
-it from the text itself. This is more reliable (Sarvam's dedicated
-language-ID is better at this than an LLM eyeballing a short tip) and
-keeps the language consistent across the whole round-trip: the same
-code that transcribed the audio is used to phrase the clarifying
-question, and later to pick the TTS voice for speaking it back.
+Round cap is enforced by routers/knowledge.py + the frontend.
+This module always reports what the model thinks for the current text.
 """
+
+from __future__ import annotations
 
 import json
 
 from rag.llm_provider import generate_text
 
-REVIEW_AND_POLISH_PROMPT = """You are reviewing a tip a factory worker wants to add to a shared knowledge base for other workers on machine {machine_id}.
+REVIEW_AND_POLISH_PROMPT = """You are a senior shop-floor coworker reviewing a tip for machine {machine_id}.
+Another worker must be able to use this tip alone during a real job.
 
-The worker's spoken/written language is: {language_code}. Write any question in that exact language and script - do not switch languages or transliterate.
+Worker's language: {language_code}. Write any question in that exact language and script.
 
-Do two things:
+This is review round {round} of up to 3 clarifying rounds.
+Already collected tip text (may include earlier answers):
+\"\"\"{text}\"\"\"
 
-1. COMPLETENESS: Decide if this tip is complete enough to be useful on its own - meaning another worker reading it later would understand both what the situation/issue is AND what to actually do about it (or what to expect), without needing to ask a follow-up question. Only flag it as incomplete if something genuinely important is missing. When in doubt, or if the tip is short but already clear, treat it as complete - do not invent problems with a tip that already makes sense.
+Do three things:
 
-2. POLISH: Lightly clean up grammar, spelling, and clarity - WITHOUT changing, adding, or removing any facts, details, or claims. The tip may be specific to this worker's exact machine or process, and might differ from what's true elsewhere - keep the original meaning exactly as stated. Only fix how it's written, never what it says.
+1) COMPLETENESS
+Mark complete=true ONLY if the tip clearly covers BOTH:
+  - the situation / symptom / when it applies on THIS machine, AND
+  - the concrete action, setting, check, or outcome (what to do / expect).
+If either is vague, missing, or only general advice, mark complete=false.
 
-Tip: "{text}"
+Do NOT mark complete just because the tip is short. Short + specific can be complete.
+Do NOT mark incomplete just to be thorough if a coworker could already act on it.
 
-Respond with exactly this JSON structure:
-{{"complete": true or false, "question": "<one short, specific, conversational question if incomplete, else null>", "polished_text": "<grammar-cleaned version of the tip, same facts>"}}
+2) CROSS-QUESTION (only when complete=false)
+Ask exactly ONE short, conversational question about the SINGLE most important gap.
+The question MUST be specific to THIS tip and THIS machine — reference what they already said.
+Good examples:
+  - "You said the spindle overheats on long runs — after how many minutes, and what did you change?"
+  - "Which alarm code or display message did you see when that happened?"
+  - "What RPM / feed did you settle on after the fix?"
+Bad (too general — never use these):
+  - "Can you add more details?"
+  - "What else should we know?"
+  - "Please explain the problem."
 
-If asking a question: phrase it the way a helpful coworker would ask out loud, and briefly acknowledge what's already clear before naming the one specific thing that's missing (e.g. "Got it that it's the spindle - but what did you actually do to fix it?"). Ask about only the SINGLE most important missing piece, never more than one question.
+Prefer cross-checks that pin down: numbers, part names, alarm codes, sequence of steps,
+what failed vs what worked, safety constraint, or how they knew it was fixed.
 
-Respond with ONLY the JSON object, no other text, no markdown formatting."""
+3) POLISH
+polished_text = same facts, cleaner grammar/spelling only. Do not invent details.
+
+Respond with ONLY this JSON (no markdown):
+{{"complete": true or false, "question": "<one specific question or null>", "polished_text": "<cleaned tip>"}}
+"""
 
 
-def review_knowledge(text: str, machine_id: str, language_code: str = "en-IN") -> dict:
+def review_knowledge(
+    text: str,
+    machine_id: str,
+    language_code: str = "en-IN",
+    round: int = 1,
+) -> dict:
     """
     Returns {"complete": bool, "question": str|None, "polished_text": str, "language_code": str}.
-    Always returns a polished_text, regardless of completeness - grammar
-    cleanup is independent of whether the content itself needs more detail.
-
-    language_code: the language Sarvam STT detected when the worker spoke
-    (or the language their typed text is in, if typed instead of spoken).
-    Passed straight through into the returned dict so the caller
-    (routers/knowledge.py) can forward it to the frontend without having
-    to re-derive it - the frontend then uses it to pick which language
-    the clarifying question / confirmation is spoken back in via /speak.
     """
-    prompt = REVIEW_AND_POLISH_PROMPT.format(text=text, machine_id=machine_id, language_code=language_code)
+    prompt = REVIEW_AND_POLISH_PROMPT.format(
+        text=text,
+        machine_id=machine_id,
+        language_code=language_code,
+        round=max(1, int(round or 1)),
+    )
 
     try:
         raw = generate_text(prompt).strip()
     except Exception:
-        # If even the fallback provider fails, don't block the worker -
-        # treat as complete and keep their original wording untouched.
-        return {"complete": True, "question": None, "polished_text": text, "language_code": language_code}
+        return {
+            "complete": True,
+            "question": None,
+            "polished_text": text,
+            "language_code": language_code,
+        }
 
     if raw.startswith("```"):
         raw = raw.strip("`")
@@ -84,13 +97,25 @@ def review_knowledge(text: str, machine_id: str, language_code: str = "en-IN") -
     try:
         result = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        # Model didn't return clean JSON - fail safe: complete, original text.
-        return {"complete": True, "question": None, "polished_text": text, "language_code": language_code}
+        return {
+            "complete": True,
+            "question": None,
+            "polished_text": text,
+            "language_code": language_code,
+        }
 
     complete = bool(result.get("complete", True))
+    question = result.get("question")
+    if complete:
+        question = None
+    elif question is not None:
+        question = str(question).strip() or None
+        if not question:
+            complete = True
+
     return {
         "complete": complete,
-        "question": None if complete else result.get("question"),
+        "question": question,
         "polished_text": result.get("polished_text") or text,
         "language_code": language_code,
     }

@@ -259,9 +259,36 @@ def worker_logout(worker: dict = Depends(require_worker), db: Session = Depends(
 
 @router.get("/my-machines")
 def my_machines(worker: dict = Depends(require_worker), db: Session = Depends(get_db)):
-    """Returns only the machines THIS logged-in worker has been assigned by admin."""
-    assignments = db.query(WorkerMachine).filter(WorkerMachine.worker_id == worker["worker_id"]).all()
-    return {"machine_ids": [a.machine_id for a in assignments]}
+    """
+    Returns only the machines THIS logged-in worker has been assigned by admin
+    AND that still exist in the knowledge base. Orphan assignments (machine
+    was deleted) are cleaned up automatically so they never appear in Ask,
+    Safety, Interview, etc.
+    """
+    from rag.chroma_store import list_all_machine_ids
+
+    assignments = (
+        db.query(WorkerMachine)
+        .filter(WorkerMachine.worker_id == worker["worker_id"])
+        .all()
+    )
+    known = set(list_all_machine_ids())
+    valid = []
+    orphans = []
+    for a in assignments:
+        if a.machine_id in known:
+            valid.append(a.machine_id)
+        else:
+            orphans.append(a.machine_id)
+
+    if orphans:
+        db.query(WorkerMachine).filter(
+            WorkerMachine.worker_id == worker["worker_id"],
+            WorkerMachine.machine_id.in_(orphans),
+        ).delete(synchronize_session=False)
+        db.commit()
+
+    return {"machine_ids": valid}
 
 
 @router.get("/my-tips")

@@ -9,6 +9,10 @@ metadata tag ("pending" / "approved"), not as separate collections.
 Also holds helper functions for managing manuals specifically - listing
 which manuals exist for a machine, and deleting one manual's chunks
 cleanly (used for admin manual management and for override-on-re-ingest).
+
+Machine deletion: delete_all_for_machine removes every Chroma entry
+(manual chunks + worker tips + interview-derived knowledge) for one
+machine_id in one call.
 """
 
 import chromadb
@@ -60,12 +64,35 @@ def delete_manual(machine_id: str, filename: str) -> int:
         collection.delete(ids=ids_to_delete)
     return len(ids_to_delete)
 
+
+def delete_all_for_machine(machine_id: str) -> int:
+    """
+    Permanently deletes every Chroma entry (manuals, worker tips,
+    interview-derived knowledge, etc.) tagged with this machine_id.
+    Returns how many documents were removed.
+    """
+    existing = collection.get(where={"machine_id": machine_id})
+    ids_to_delete = existing.get("ids") or []
+    if ids_to_delete:
+        # Chroma accepts batches; delete in chunks if extremely large
+        batch = 500
+        for i in range(0, len(ids_to_delete), batch):
+            collection.delete(ids=ids_to_delete[i : i + batch])
+    return len(ids_to_delete)
+
+
 def list_all_machine_ids() -> list[str]:
     """
-    Returns every distinct machine_id that has at least one manual chunk
-    ingested - used to populate the admin's machine-assignment dropdown,
-    so admin picks from machines that actually exist rather than typing
-    a machine_id freehand.
+    Returns every distinct machine_id that has at least one document
+    in Chroma (manual or tip). Used for admin dropdowns so admins only
+    see machines that still exist in the knowledge base.
     """
-    results = collection.get(where={"source_type": "manual"})
-    return sorted(set(m.get("machine_id") for m in results["metadatas"] if m.get("machine_id")))
+    # Prefer manuals (authoritative "machine exists"), but also surface
+    # machines that only have tips so orphan tips remain visible until cleaned.
+    results = collection.get(include=["metadatas"])
+    ids = set()
+    for m in results.get("metadatas") or []:
+        mid = (m or {}).get("machine_id")
+        if mid:
+            ids.add(mid)
+    return sorted(ids)

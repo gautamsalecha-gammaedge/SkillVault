@@ -15,7 +15,7 @@ import SpeakButton from '../../components/SpeakButton';
 import { useToast } from '../../components/Toast';
 
 /**
- * Stages: draft → checking → followup (up to 2) → combining → final → done
+ * Stages: draft → checking → followup (up to 3) → combining → final → done
  * Simple body text only. Wide form + side tutorial panel.
  */
 
@@ -26,7 +26,7 @@ const numStyle = {
 
 const HOW_STEPS = [
   { n: 1, title: 'Write or speak', body: 'Share the tip in your own words. Live captions appear while you talk.' },
-  { n: 2, title: 'AI checks', body: 'AI looks for missing details. It may ask up to 2 short follow-ups.' },
+  { n: 2, title: 'AI checks', body: 'AI looks for missing details. It may ask up to 3 specific cross-questions.' },
   { n: 3, title: 'Confirm', body: 'You see one combined tip — edit it, listen to it, then submit for review.' },
 ];
 
@@ -438,7 +438,7 @@ export default function MyTips() {
     else startListening(target || 'main');
   };
 
-  /** Allow follow-ups on check rounds 1 and 2 (two cross-questions max). */
+  /** Allow follow-ups on check rounds 1–3 (up to three specific cross-questions). */
   const runCheck = async (bodyText, checkRound) => {
     const body = bodyText.trim();
     if (!body || !machineId) {
@@ -449,7 +449,7 @@ export default function MyTips() {
     setFollowupQ('');
     try {
       const res = await api.checkKnowledge(body, machineId, checkRound, languageCode);
-      if (res && res.question && checkRound <= 2) {
+      if (res && res.question && checkRound <= 3) {
         setFollowupQ(res.question);
         setFollowupAnswer('');
         setRound(checkRound);
@@ -630,7 +630,7 @@ export default function MyTips() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-wider text-amber mb-1">
-                            Follow-up {round} of 2
+                            Follow-up {round} of 3
                           </p>
                           <h2 className="text-xl font-semibold text-text">One more detail needed</h2>
                         </div>

@@ -23,6 +23,8 @@ export default function Ask() {
   const workerId = getWorkerId() || '';
   const [thread, setThread] = useState([]);
   const [asking, setAsking] = useState(false);
+  const [askElapsed, setAskElapsed] = useState(0);
+  const askTimerRef = useRef(null);
   const [autoSpeak, setAutoSpeak] = useState(true);
   const threadsByMachineRef = useRef({});
   const activeMachineRef = useRef('');
@@ -613,6 +615,9 @@ export default function Ask() {
     setQuestion('');
     clearImage(false); // clear composer only — do not revoke message preview URL
     setAsking(true);
+    setAskElapsed(0);
+    if (askTimerRef.current) clearInterval(askTimerRef.current);
+    askTimerRef.current = setInterval(() => setAskElapsed((s) => s + 1), 1000);
     try {
       // Context window: last turns before this question (max 8 = ~4 Q&A pairs)
       const history = thread
@@ -641,6 +646,11 @@ export default function Ask() {
       setThread((t) => t.filter((m) => m.id !== `w-${id}`));
     } finally {
       setAsking(false);
+      if (askTimerRef.current) {
+        clearInterval(askTimerRef.current);
+        askTimerRef.current = null;
+      }
+      setAskElapsed(0);
     }
   };
 
@@ -906,9 +916,22 @@ export default function Ask() {
                 <div className="w-9 h-9 rounded-full bg-signal/15 border-2 border-signal/30 flex items-center justify-center text-signal shrink-0">
                   <Bot size={18} />
                 </div>
-                <div className="rounded-2xl rounded-bl-md border-2 border-line bg-surface px-4 py-3 flex items-center gap-2">
-                  <Loader2 size={16} className="animate-spin text-amber" />
-                  <span className="text-sm text-muted">Looking up manuals & tips…</span>
+                <div className="rounded-2xl rounded-bl-md border-2 border-line bg-surface px-4 py-3 max-w-[min(100%,28rem)]">
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={16} className="animate-spin text-amber shrink-0" />
+                    <span className="text-sm font-medium text-text">
+                      {askElapsed < 3
+                        ? 'Searching manuals & approved tips…'
+                        : askElapsed < 8
+                          ? 'Reading the best matches…'
+                          : askElapsed < 20
+                            ? 'Writing a clear answer…'
+                            : 'Still working — complex answers can take a bit…'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted mt-1.5 font-mono tabular-nums">
+                    {askElapsed}s · answers use only this machine’s knowledge (no guessing)
+                  </p>
                 </div>
               </div>
             )}

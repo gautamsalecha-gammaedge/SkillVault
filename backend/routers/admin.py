@@ -22,7 +22,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from rag.embeddings import embed_text_with_retry
 from db import get_db
-from models import Admin, AdminSession, AdminProfile, Worker, WorkerSession, WorkerMachine, Ticket, QuestionLog, InterviewSession, SafetyCompletion, PasswordResetRequest
+from models import (
+    Admin, AdminSession, AdminProfile, Worker, WorkerSession, WorkerMachine,
+    Ticket, QuestionLog, InterviewSession, InterviewTurn, SafetyMeasure,
+    SafetyCompletion, PasswordResetRequest, DailyUpdate,
+)
 from schemas import (
     AdminLoginRequest,
     AssignMachineRequest,
@@ -37,7 +41,7 @@ from schemas import (
 from auth.security import hash_password, verify_password, make_expiry_time
 from auth.admin_auth import require_admin
 from auth.admin_accounts import ensure_seed_admin
-from rag.chroma_store import collection , list_manuals, delete_manual , list_all_machine_ids
+from rag.chroma_store import collection, list_manuals, delete_manual, list_all_machine_ids, delete_all_for_machine
 from config import TOKEN_EXPIRY_HOURS
 
 import tempfile
@@ -618,28 +622,156 @@ def remove_manual(machine_id: str, filename: str, authorized: bool = Depends(req
 
 @router.get("/all-machines")
 def get_all_machines(authorized: bool = Depends(require_admin)):
-    """Lists every machine_id that has at least one manual uploaded - for the assignment dropdown."""
+    """
+    Lists every machine_id that still has knowledge in Chroma (manuals or tips).
+    Used for assignment dropdowns and the Manuals page machine list.
+    """
     return {"machine_ids": list_all_machine_ids()}
+
+
+@router.delete("/machines/{machine_id}")
+def delete_machine(
+    machine_id: str,
+    authorized: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently remove a machine and all related data in one click:
+
+    - All Chroma knowledge (manuals, worker tips, interview-derived entries)
+    - Worker ↔ machine assignments
+    - Safety measures + completions for this machine
+    - Interview sessions (+ turns) for this machine
+    - Tickets, question logs, daily updates tagged with this machine
+
+    After this, the machine disappears from admin lists, worker selectors,
+    Ask, Safety, Interview, etc. Workers can no longer select it.
+    """
+    machine_id = (machine_id or "").strip()
+    if not machine_id:
+        raise HTTPException(status_code=400, detail="machine_id is required.")
+
+    # How many workers had this machine (for response)
+    assignment_count = (
+        db.query(WorkerMachine)
+        .filter(WorkerMachine.machine_id == machine_id)
+        .count()
+    )
+
+    # --- Postgres cascade (order matters where FKs exist) ---
+    # Interview turns → sessions
+    session_ids = [
+        r[0]
+        for r in db.query(InterviewSession.id)
+        .filter(InterviewSession.machine_id == machine_id)
+        .all()
+    ]
+    turns_deleted = 0
+    if session_ids:
+        turns_deleted = (
+            db.query(InterviewTurn)
+            .filter(InterviewTurn.session_id.in_(session_ids))
+            .delete(synchronize_session=False)
+        )
+    sessions_deleted = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.machine_id == machine_id)
+        .delete(synchronize_session=False)
+    )
+
+    safety_measures_deleted = (
+        db.query(SafetyMeasure)
+        .filter(SafetyMeasure.machine_id == machine_id)
+        .delete(synchronize_session=False)
+    )
+    safety_completions_deleted = (
+        db.query(SafetyCompletion)
+        .filter(SafetyCompletion.machine_id == machine_id)
+        .delete(synchronize_session=False)
+    )
+    tickets_deleted = (
+        db.query(Ticket)
+        .filter(Ticket.machine_id == machine_id)
+        .delete(synchronize_session=False)
+    )
+    question_logs_deleted = (
+        db.query(QuestionLog)
+        .filter(QuestionLog.machine_id == machine_id)
+        .delete(synchronize_session=False)
+    )
+    daily_updates_deleted = (
+        db.query(DailyUpdate)
+        .filter(DailyUpdate.machine_id == machine_id)
+        .delete(synchronize_session=False)
+    )
+    assignments_deleted = (
+        db.query(WorkerMachine)
+        .filter(WorkerMachine.machine_id == machine_id)
+        .delete(synchronize_session=False)
+    )
+
+    db.commit()
+
+    # --- Chroma: all knowledge for this machine ---
+    chroma_deleted = delete_all_for_machine(machine_id)
+
+    return {
+        "status": "deleted",
+        "machine_id": machine_id,
+        "summary": {
+            "chroma_entries_removed": chroma_deleted,
+            "worker_assignments_removed": assignments_deleted,
+            "workers_affected": assignment_count,
+            "interview_sessions_removed": sessions_deleted,
+            "interview_turns_removed": turns_deleted,
+            "safety_measures_removed": safety_measures_deleted,
+            "safety_completions_removed": safety_completions_deleted,
+            "tickets_removed": tickets_deleted,
+            "question_logs_removed": question_logs_deleted,
+            "daily_updates_removed": daily_updates_deleted,
+        },
+        "message": (
+            f"Machine '{machine_id}' and all related knowledge, assignments, "
+            "interviews, safety data, tickets, and daily updates were removed."
+        ),
+    }
 
 
 @router.post("/assign-machine")
 def assign_machine(req: AssignMachineRequest, authorized: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    """Grants a worker access to one machine. Safe to call again for an already-assigned pair (no duplicate error)."""
+    """Grants a worker access to one machine. Safe to call again for an already-assigned pair (no duplicate error).
+    Only machines that still exist in the knowledge base (have Chroma entries) can be assigned,
+    so deleted machines cannot be re-assigned by accident.
+    """
     worker = db.query(Worker).filter(Worker.worker_id == req.worker_id).first()
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found.")
 
+    mid = (req.machine_id or "").strip()
+    if not mid:
+        raise HTTPException(status_code=400, detail="machine_id is required.")
+
+    known = set(list_all_machine_ids())
+    if mid not in known:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Machine '{mid}' does not exist or was deleted. "
+                "Upload a manual for this machine first, or pick a machine from the list."
+            ),
+        )
+
     existing = db.query(WorkerMachine).filter(
         WorkerMachine.worker_id == req.worker_id,
-        WorkerMachine.machine_id == req.machine_id,
+        WorkerMachine.machine_id == mid,
     ).first()
     if existing:
-        return {"status": "already assigned", "worker_id": req.worker_id, "machine_id": req.machine_id}
+        return {"status": "already assigned", "worker_id": req.worker_id, "machine_id": mid}
 
-    db.add(WorkerMachine(worker_id=req.worker_id, machine_id=req.machine_id))
+    db.add(WorkerMachine(worker_id=req.worker_id, machine_id=mid))
     db.commit()
 
-    return {"status": "assigned", "worker_id": req.worker_id, "machine_id": req.machine_id}
+    return {"status": "assigned", "worker_id": req.worker_id, "machine_id": mid}
 
 
 @router.delete("/unassign-machine")

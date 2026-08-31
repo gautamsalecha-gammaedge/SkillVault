@@ -86,10 +86,6 @@ def _optimize_with_gemini(raw: str, machine_id: Optional[str] = None) -> str:
     if not text_in:
         raise HTTPException(status_code=400, detail="Nothing to optimize — write or speak an update first.")
 
-    if not GEMINI_API_KEY:
-        # Graceful fallback when key is missing in local/dev
-        return text_in
-
     machine_line = f" Machine mentioned: {machine_id}." if machine_id else ""
     prompt = f"""You are helping a factory worker write a clear daily work update for their supervisor.
 
@@ -108,23 +104,17 @@ Worker text:
 """
 
     try:
-        from google import genai
-
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        model = LLM_MODEL or "gemini-2.0-flash"
-        resp = client.models.generate_content(model=model, contents=prompt)
-        out = (getattr(resp, "text", None) or "").strip()
+        from rag.llm_provider import generate_text
+        out = (generate_text(prompt) or "").strip()
         if not out:
             return text_in
-        # Strip accidental code fences
         if out.startswith("```"):
-            lines = out.split("\n")
-            out = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+            lines = out.split(chr(10))
+            out = chr(10).join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
         return out or text_in
     except Exception as e:
-        # Never block the worker — return original text
+        print(f"[daily-updates] optimize failed: {e}")
         return text_in
-
 
 @router.post("/optimize")
 def optimize_daily_update(

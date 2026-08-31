@@ -96,6 +96,26 @@ export default function KnowledgeReview() {
   );
 }
 
+
+/** Split stored tip body: worker words vs AI media blocks. */
+function splitTipBody(raw) {
+  const full = String(raw || '');
+  const marker = /\n\s*\[(Video Understanding|Image Understanding|Transcript|Image Text)\]\s*:?\s*/i;
+  const parts = full.split(marker);
+  // parts[0] = body, then alternating label, content
+  const body = (parts[0] || '').trim();
+  const blocks = { videoUnderstanding: '', transcript: '', imageUnderstanding: '', imageText: '' };
+  for (let i = 1; i < parts.length; i += 2) {
+    const label = (parts[i] || '').toLowerCase();
+    const content = (parts[i + 1] || '').trim();
+    if (label.includes('video')) blocks.videoUnderstanding = content;
+    else if (label.includes('transcript')) blocks.transcript = content;
+    else if (label.includes('image understanding')) blocks.imageUnderstanding = content;
+    else if (label.includes('image text')) blocks.imageText = content;
+  }
+  return { body: body || full.trim(), ...blocks };
+}
+
 function TipsTab({ machineId }) {
   const toast = useToast();
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -308,9 +328,74 @@ function TipsTab({ machineId }) {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-[15px] text-text leading-relaxed whitespace-pre-wrap mb-3">
-                      {e.text}
-                    </p>
+                    (() => {
+                      const parsed = splitTipBody(e.text);
+                      const videoUnderstanding = (e.video_description || '').trim() || parsed.videoUnderstanding;
+                      const transcript = (e.transcript || '').trim() || parsed.transcript;
+                      const imageUnderstanding = (e.image_description || '').trim() || parsed.imageUnderstanding;
+                      const imageText = (e.image_visible_text || '').trim() || parsed.imageText;
+                      return (
+                        <div className="mb-3 space-y-3">
+                          <p className="text-[15px] text-text leading-relaxed whitespace-pre-wrap">
+                            {parsed.body}
+                          </p>
+                          {(videoUnderstanding || transcript) && (
+                            <div className="rounded-xl border-2 border-line bg-surface-2/80 overflow-hidden">
+                              {videoUnderstanding && (
+                                <div className="px-3.5 py-3 border-b border-line last:border-b-0">
+                                  <div className="flex items-center gap-2 mb-1.5">
+                                    <Video size={14} className="text-amber shrink-0" />
+                                    <span className="text-[11px] font-bold uppercase tracking-wide text-amber">
+                                      Video understanding
+                                    </span>
+                                  </div>
+                                  <p className="text-[13px] text-muted leading-relaxed whitespace-pre-wrap">
+                                    {videoUnderstanding}
+                                  </p>
+                                </div>
+                              )}
+                              {transcript && (
+                                <div className="px-3.5 py-3">
+                                  <div className="flex items-center gap-2 mb-1.5">
+                                    <Mic2 size={14} className="text-signal shrink-0" />
+                                    <span className="text-[11px] font-bold uppercase tracking-wide text-signal">
+                                      Transcript
+                                    </span>
+                                  </div>
+                                  <p className="text-[13px] text-text/80 leading-relaxed whitespace-pre-wrap italic">
+                                    “{transcript}”
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {(imageUnderstanding || imageText) && (
+                            <div className="rounded-xl border-2 border-line bg-surface-2/80 px-3.5 py-3">
+                              {imageUnderstanding && (
+                                <div className={imageText ? 'mb-2' : ''}>
+                                  <span className="text-[11px] font-bold uppercase tracking-wide text-signal">
+                                    Image understanding
+                                  </span>
+                                  <p className="text-[13px] text-muted leading-relaxed mt-1 whitespace-pre-wrap">
+                                    {imageUnderstanding}
+                                  </p>
+                                </div>
+                              )}
+                              {imageText && (
+                                <div>
+                                  <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
+                                    Visible text in image
+                                  </span>
+                                  <p className="text-[13px] text-text/80 leading-relaxed mt-1 whitespace-pre-wrap font-mono">
+                                    {imageText}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
                   )}
 
                   {(e.video_url || e.image_url) && (
@@ -332,34 +417,12 @@ function TipsTab({ machineId }) {
                           />
                         </button>
                       )}
-                      {(e.video_description || e.image_description) && (
-                        <div className="rounded-xl bg-surface-2 border border-line px-3 py-2 text-[13px] text-muted leading-relaxed">
-                          {e.video_description && (
-                            <p>
-                              <span className="font-semibold text-amber uppercase text-[10px] tracking-wide">
-                                Video understanding
-                              </span>
-                              <br />
-                              {e.video_description}
-                            </p>
-                          )}
-                          {e.image_description && (
-                            <p className={e.video_description ? 'mt-2' : ''}>
-                              <span className="font-semibold text-signal uppercase text-[10px] tracking-wide">
-                                Image understanding
-                              </span>
-                              <br />
-                              {e.image_description}
-                            </p>
-                          )}
-                        </div>
-                      )}
                     </div>
                   )}
 
                   <div className="flex flex-wrap items-center gap-2">
                     {!!(e.text || '').trim() && (
-                      <SpeakButton text={e.text} language_code={e.language_code || 'en-IN'} label="Listen" />
+                      <SpeakButton text={splitTipBody(e.text).body} language_code={e.language_code || 'en-IN'} label="Listen" />
                     )}
                     {(st === 'pending' || st === 'rejected') && (
                       <Button size="sm" icon={Check} onClick={() => approve(e.id)} loading={busyId === e.id}>
