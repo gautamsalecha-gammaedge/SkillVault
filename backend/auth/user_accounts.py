@@ -283,7 +283,7 @@ def ensure_at_least_one_owner(db: Session) -> None:
 
 
 def seed_first_supervisor_if_empty(db: Session) -> None:
-    """If no supervisor role exists, seed from env or admin/admin."""
+    """If no supervisor role exists, seed from env or admin/admin123."""
     ensure_users_schema(db)
     migrate_all_identities(db)
     any_sup = (
@@ -292,13 +292,19 @@ def seed_first_supervisor_if_empty(db: Session) -> None:
     if any_sup:
         return
     username = (os.environ.get("ADMIN_USERNAME") or "admin").strip() or "admin"
-    password = os.environ.get("ADMIN_PASSWORD") or "admin"
+    password = os.environ.get("ADMIN_PASSWORD") or "admin123"
+    if len(password) < 6:
+        # Guard against a too-short env password silently breaking the seed.
+        password = "admin123"
     try:
         create_supervisor(db, username=username, password=password, name=username)
     except ValueError:
         pass
-    # First account is plant owner
-    ensure_role(db, username, ROLE_OWNER)
+    # First account is plant owner — only safe to grant the role if the user
+    # row actually exists (create_supervisor may have failed above for a
+    # reason unrelated to "already exists", e.g. a bad password).
+    if db.query(User).filter(User.user_id == username).first():
+        ensure_role(db, username, ROLE_OWNER)
     ensure_at_least_one_owner(db)
 
 

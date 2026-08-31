@@ -4,8 +4,12 @@
 
 import { getWorkerToken, getAdminToken, clearWorkerSession, clearAdminSession } from './auth';
 
-const API_BASE = localStorage.getItem('sv_api_base') || 'http://127.0.0.1:8000';
-export function getApiBase() { return API_BASE; }
+const API_BASE =
+  import.meta.env.VITE_API_BASE ||
+  localStorage.getItem('sv_api_base') ||
+  'http://127.0.0.1:8000';export function getApiBase() { return API_BASE; }
+
+
 export function setApiBase(url) { localStorage.setItem('sv_api_base', url); }
 
 export function mediaUrl(path) {

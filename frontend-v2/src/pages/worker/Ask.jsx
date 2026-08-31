@@ -364,7 +364,35 @@ export default function Ask() {
    *  2. FALLBACK — Sarvam STT on the recorded blob (strong on Indian languages)
    * Browser is preferred because Sarvam does not cover many non-Indian languages.
    */
-  const startListening = async () => {
+  const rec = new SR();
+recognitionRef.current = rec;
+rec.continuous = true;
+rec.interimResults = true;
+rec.lang = lang;
+const lastFinalIndexRef = { current: -1 }; // tracks highest finalized result index we've already used
+rec.onresult = (event) => {
+  let interim = '';
+  let final = '';
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const r = event.results[i];
+    if (r.isFinal) {
+      // Skip results we've already finalized — Chrome can re-emit them after a restart
+      if (i <= lastFinalIndexRef.current) continue;
+      lastFinalIndexRef.current = i;
+      final += r[0].transcript;
+    } else {
+      interim += r[0].transcript;
+    }
+  }
+  if (final) {
+    browserGotResultRef.current = true;
+    browserFinalRef.current = `${browserFinalRef.current} ${final}`.trim();
+    setQuestion((t) => (t ? `${t} ${final}` : final).trim());
+    setLiveCaption(interim);
+  } else {
+    setLiveCaption(interim);
+  }
+};
     setLiveCaption('');
     setListening(true);
     browserFinalRef.current = '';
