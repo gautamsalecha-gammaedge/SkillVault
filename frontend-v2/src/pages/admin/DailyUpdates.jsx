@@ -8,6 +8,7 @@ import {
 import { api, ApiError } from '../../lib/api';
 import { Card, Button, FullPageLoader } from '../../components/ui';
 import { useToast } from '../../components/Toast';
+import SpeakButton from '../../components/SpeakButton';
 
 const READ_KEY = 'sv_admin_daily_read_ids';
 
@@ -495,7 +496,16 @@ function SplitList({ rows, selected, readIds, onOpen, onClose, onMarkRead, onMar
               </div>
 
               <div className="p-6 sm:p-8 flex-1 flex flex-col min-h-0">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-400 mb-2">Polished update</p>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">Polished update</p>
+                  {!!(selected.optimized_text || '').trim() && (
+                    <SpeakButton
+                      text={selected.optimized_text}
+                      language_code={selected.language_code || 'en-IN'}
+                      label="Listen"
+                    />
+                  )}
+                </div>
                 <div className="rounded-2xl bg-stone-50 border border-stone-100 px-5 sm:px-6 py-5 flex-1 min-h-[280px] max-h-[min(70vh,640px)] overflow-y-auto">
                   <p className="text-base sm:text-[17px] text-stone-800 leading-[1.7] whitespace-pre-wrap">{selected.optimized_text}</p>
                 </div>
@@ -503,7 +513,16 @@ function SplitList({ rows, selected, readIds, onOpen, onClose, onMarkRead, onMar
                 {selected.raw_text && selected.raw_text !== selected.optimized_text && (
                   <details className="mt-4 text-sm text-stone-500">
                     <summary className="cursor-pointer hover:text-stone-800 font-medium">Original draft</summary>
-                    <p className="mt-2 whitespace-pre-wrap leading-relaxed text-[15px]">{selected.raw_text}</p>
+                    <div className="mt-2 flex flex-wrap items-start gap-2">
+                      <p className="flex-1 min-w-0 whitespace-pre-wrap leading-relaxed text-[15px]">{selected.raw_text}</p>
+                      {!!(selected.raw_text || '').trim() && (
+                        <SpeakButton
+                          text={selected.raw_text}
+                          language_code={selected.language_code || 'en-IN'}
+                          label="Listen"
+                        />
+                      )}
+                    </div>
                   </details>
                 )}
 
