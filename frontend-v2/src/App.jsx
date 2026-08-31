@@ -13,9 +13,9 @@ import Overview from './pages/worker/Overview';
 import Ask from './pages/worker/Ask';
 import Safety from './pages/worker/Safety';
 import SafetyBriefing from './pages/worker/SafetyBriefing';
-import MyTips from './pages/worker/MyTips';
 import Interview from './pages/worker/Interview';
-import MyTickets from './pages/worker/MyTickets';
+import MyTips from "./pages/worker/MyTips";
+import MyTickets from "./pages/worker/MyTickets";
 import DailyUpdate from './pages/worker/DailyUpdate';
 import WorkerSettings from './pages/worker/Settings';
 
@@ -43,11 +43,15 @@ export default function App() {
         <Route path="safety" element={<Safety />} />
         <Route path="safety/:machineId" element={<SafetyBriefing />} />
         <Route path="add-tip" element={<Navigate to="/worker/my-tips" replace />} />
+        <Route path="tips" element={<Navigate to="/worker/my-tips" replace />} />
         <Route path="my-tips" element={<MyTips />} />
         <Route path="interview" element={<Interview />} />
+        <Route path="interview-session" element={<Navigate to="/worker/interview" replace />} />
         <Route path="raise-ticket" element={<Navigate to="/worker/my-tickets" replace />} />
+        <Route path="tickets" element={<Navigate to="/worker/my-tickets" replace />} />
         <Route path="my-tickets" element={<MyTickets />} />
         <Route path="daily-update" element={<DailyUpdate />} />
+        <Route path="profile" element={<Navigate to="/worker/settings" replace />} />
         <Route path="settings" element={<WorkerSettings />} />
       </Route>
 

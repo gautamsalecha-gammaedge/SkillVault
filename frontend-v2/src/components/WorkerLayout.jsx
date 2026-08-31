@@ -10,15 +10,15 @@ import { api } from '../lib/api';
 import PageTransition from './PageTransition';
 
 const NAV = [
-  // High-frequency first · Interview is rare · Profile last
+  // Must match routes in App.jsx exactly
   { to: '/worker', label: 'Overview', icon: Gauge, end: true },
   { to: '/worker/ask', label: 'Ask AI', icon: MessageCircleQuestion },
   { to: '/worker/daily-update', label: 'Daily update', icon: NotebookPen },
   { to: '/worker/safety', label: 'Safety', icon: ShieldCheck },
-  { to: '/worker/tips', label: 'Tips', icon: ListChecks },
-  { to: '/worker/tickets', label: 'Tickets', icon: Ticket },
-  { to: '/worker/interview-session', label: 'Interview session', icon: Mic2 },
-  { to: '/worker/profile', label: 'Profile', icon: Settings },
+  { to: '/worker/my-tips', label: 'Tips', icon: ListChecks },
+  { to: '/worker/my-tickets', label: 'Tickets', icon: Ticket },
+  { to: '/worker/interview', label: 'Interview', icon: Mic2 },
+  { to: '/worker/settings', label: 'Profile', icon: Settings },
 ];
 
 const DEFAULT_WIDTH = 300;

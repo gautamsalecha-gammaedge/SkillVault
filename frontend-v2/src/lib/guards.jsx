@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { getWorkerToken, getAdminToken, clearWorkerSession, clearAdminSession } from './auth';
-import { api } from './api';
+import { api, ApiError } from './api';
 
-/** Max wait for session verify — never hang on "Checking session…" */
-const SESSION_CHECK_MS = 5000;
+const SESSION_CHECK_MS = 8000;
 
 function withTimeout(promise, ms) {
   return new Promise((resolve, reject) => {
@@ -23,8 +22,8 @@ function withTimeout(promise, ms) {
 }
 
 /**
- * Worker routes: verify token quickly (5s max), then ok or login.
- * Never leaves the UI stuck on "Checking session…".
+ * Worker routes: verify token.
+ * Only clear session on 401/403. Network/timeout must not force login.
  */
 export function RequireWorker({ children }) {
   const hasToken = !!getWorkerToken();
@@ -40,9 +39,15 @@ export function RequireWorker({ children }) {
       try {
         await withTimeout(api.myProfile(), SESSION_CHECK_MS);
         if (!cancelled) setStatus('ok');
-      } catch (_) {
-        clearWorkerSession();
-        if (!cancelled) setStatus('deny');
+      } catch (err) {
+        if (cancelled) return;
+        const statusCode = err instanceof ApiError ? err.status : 0;
+        if (statusCode === 401 || statusCode === 403) {
+          clearWorkerSession();
+          setStatus('deny');
+        } else {
+          setStatus('ok');
+        }
       }
     })();
     return () => {
@@ -50,9 +55,7 @@ export function RequireWorker({ children }) {
     };
   }, [hasToken]);
 
-  if (status === 'deny') {
-    return <Navigate to="/login" replace />;
-  }
+  if (status === 'deny') return <Navigate to="/login" replace />;
   if (status === 'checking') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f7f3ec] text-sm text-stone-500">
@@ -63,7 +66,6 @@ export function RequireWorker({ children }) {
   return children;
 }
 
-/** Admin routes — same fast verify via GET /admin/profile. */
 export function RequireAdmin({ children }) {
   const hasToken = !!getAdminToken();
   const [status, setStatus] = useState(hasToken ? 'checking' : 'deny');
@@ -78,9 +80,15 @@ export function RequireAdmin({ children }) {
       try {
         await withTimeout(api.adminProfile(), SESSION_CHECK_MS);
         if (!cancelled) setStatus('ok');
-      } catch (_) {
-        clearAdminSession();
-        if (!cancelled) setStatus('deny');
+      } catch (err) {
+        if (cancelled) return;
+        const statusCode = err instanceof ApiError ? err.status : 0;
+        if (statusCode === 401 || statusCode === 403) {
+          clearAdminSession();
+          setStatus('deny');
+        } else {
+          setStatus('ok');
+        }
       }
     })();
     return () => {
@@ -88,9 +96,7 @@ export function RequireAdmin({ children }) {
     };
   }, [hasToken]);
 
-  if (status === 'deny') {
-    return <Navigate to="/login" replace />;
-  }
+  if (status === 'deny') return <Navigate to="/login" replace />;
   if (status === 'checking') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f7f3ec] text-sm text-stone-500">
