@@ -71,6 +71,10 @@ export default function Ask() {
   // Browser STT final text for this recording (primary); Sarvam is fallback only
   const browserFinalRef = useRef('');
   const browserGotResultRef = useRef(false);
+  // Snapshot of whatever was already in the textbox before this recording started —
+  // every live update recomputes base + transcript from scratch, so nothing gets
+  // appended twice (once live, once again at stop).
+  const baseTextRef = useRef('');
   // Bumps on stop so in-flight speakText does not start Sarvam after cancel
   const speakGenRef = useRef(0);
 
@@ -364,39 +368,15 @@ export default function Ask() {
    *  2. FALLBACK — Sarvam STT on the recorded blob (strong on Indian languages)
    * Browser is preferred because Sarvam does not cover many non-Indian languages.
    */
-  const rec = new SR();
-recognitionRef.current = rec;
-rec.continuous = true;
-rec.interimResults = true;
-rec.lang = lang;
-const lastFinalIndexRef = { current: -1 }; // tracks highest finalized result index we've already used
-rec.onresult = (event) => {
-  let interim = '';
-  let final = '';
-  for (let i = event.resultIndex; i < event.results.length; i++) {
-    const r = event.results[i];
-    if (r.isFinal) {
-      // Skip results we've already finalized — Chrome can re-emit them after a restart
-      if (i <= lastFinalIndexRef.current) continue;
-      lastFinalIndexRef.current = i;
-      final += r[0].transcript;
-    } else {
-      interim += r[0].transcript;
-    }
-  }
-  if (final) {
-    browserGotResultRef.current = true;
-    browserFinalRef.current = `${browserFinalRef.current} ${final}`.trim();
-    setQuestion((t) => (t ? `${t} ${final}` : final).trim());
-    setLiveCaption(interim);
-  } else {
-    setLiveCaption(interim);
-  }
-};
+  const startListening = async () => {
     setLiveCaption('');
     setListening(true);
     browserFinalRef.current = '';
     browserGotResultRef.current = false;
+    // Snapshot whatever is already typed so we can rebuild "base + transcript"
+    // fresh on every result, instead of appending onto a value that may already
+    // include part of this recording (which is what caused the duplicate text).
+    baseTextRef.current = question.trim();
     const lang = languageRef.current || navigator.language || 'en-IN';
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SR) {
@@ -405,22 +385,30 @@ rec.onresult = (event) => {
       rec.continuous = true;
       rec.interimResults = true;
       rec.lang = lang;
+      // Tracks the highest finalized result index we've already used —
+      // Chrome can re-emit already-finalized results after an internal restart.
+      const lastFinalIndexRef = { current: -1 };
       rec.onresult = (event) => {
         let interim = '';
-        let final = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const r = event.results[i];
-          if (r.isFinal) final += r[0].transcript;
-          else interim += r[0].transcript;
+          if (r.isFinal) {
+            if (i <= lastFinalIndexRef.current) continue;
+            lastFinalIndexRef.current = i;
+            browserGotResultRef.current = true;
+            // Accumulate ALL final chunks for this recording in one place …
+            browserFinalRef.current = `${browserFinalRef.current} ${r[0].transcript}`.trim();
+          } else {
+            interim += r[0].transcript;
+          }
         }
-        if (final) {
-          browserGotResultRef.current = true;
-          browserFinalRef.current = `${browserFinalRef.current} ${final}`.trim();
-          setQuestion((t) => (t ? `${t} ${final}` : final).trim());
-          setLiveCaption(interim);
-        } else {
-          setLiveCaption(interim);
-        }
+        // … then rebuild the textbox value from the snapshot every time —
+        // never append on top of the live state, so there is nothing to duplicate.
+        const combined = baseTextRef.current
+          ? `${baseTextRef.current} ${browserFinalRef.current}`.trim()
+          : browserFinalRef.current;
+        setQuestion(combined);
+        setLiveCaption(interim);
       };
       rec.onerror = () => {};
       try { rec.start(); } catch (_) {}
@@ -450,15 +438,11 @@ rec.onresult = (event) => {
     recognitionRef.current = null;
 
     const browserText = (browserFinalRef.current || '').trim();
-    // Primary path: browser already produced usable final text
+    // Primary path: browser already produced usable final text.
+    // The textbox was already kept in sync on every onresult event (base +
+    // transcript, recomputed fresh each time) — so there is nothing to
+    // append here. Re-appending here was what caused the duplicate text.
     if (browserText.length >= 2) {
-      // Question field was updated live; ensure final is present
-      setQuestion((t) => {
-        const cur = (t || '').trim();
-        if (!cur) return browserText;
-        if (cur.includes(browserText.slice(0, Math.min(16, browserText.length)))) return cur;
-        return `${cur} ${browserText}`.trim();
-      });
       // Still stop recorder to release mic; skip Sarvam
       if (had) {
         try {
@@ -508,11 +492,10 @@ rec.onresult = (event) => {
             const res = await api.transcribe(blob);
             if (res?.transcript) {
               const next = res.transcript.trim();
-              setQuestion((t) => {
-                if (!t) return next;
-                if (t.includes(next.slice(0, Math.min(16, next.length)))) return t;
-                return `${t} ${next}`.trim();
-              });
+              const combined = baseTextRef.current
+                ? `${baseTextRef.current} ${next}`.trim()
+                : next;
+              setQuestion(combined);
               if (res.language_code) languageRef.current = res.language_code;
             } else {
               toast.error("Couldn't transcribe — try typing.");
