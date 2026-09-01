@@ -694,7 +694,7 @@ export default function Interview() {
           </div>
           <h1 className="text-2xl font-semibold text-center mb-2">Allow camera & microphone</h1>
           <p className="text-[15px] text-muted text-center leading-relaxed mb-6">
-            The interview room needs both. Your camera is <strong className="text-text">preview only</strong> (not recorded).
+            The interview room needs both. Your camera is <strong className="text-text">for preview </strong> .
             Voice answers use the microphone.
           </p>
 
@@ -1087,7 +1087,7 @@ export default function Interview() {
               <div className="flex-1">
                 <h2 className="text-xl font-semibold text-text mb-1">Interview room</h2>
                 <p className="text-[15px] text-muted leading-relaxed">
-                  Left: AI interviewer · Right: your camera (preview only, not recorded).
+                  Left: AI interviewer · Right: your camera (for preview).
                 </p>
               </div>
             </div>

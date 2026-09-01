@@ -1063,13 +1063,13 @@ function Footer() {
                 href="https://gammaedge.ai/"
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center h-11 px-5 rounded-full text-sm font-semibold text-stone-900 bg-white hover:bg-stone-100 border border-white shadow-[0_4px_14px_-4px_rgba(0,0,0,0.35)] transition-all"
+                className="inline-flex items-center h-11 px-6 rounded-full text-sm font-semibold text-white bg-[#0f9d8a] hover:bg-[#12b09b] transition-all shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_8px_20px_-6px_rgba(15,157,138,0.55)]"
               >
                 GammaEdge
               </a>
               <Link
                 to="/login"
-                className="inline-flex items-center h-11 px-5 rounded-full text-sm font-semibold text-stone-900 bg-white hover:bg-stone-100 border border-white shadow-[0_4px_14px_-4px_rgba(0,0,0,0.35)] transition-all"
+                className="inline-flex items-center h-11 px-6 rounded-full text-sm font-semibold text-white bg-[#0f9d8a] hover:bg-[#12b09b] transition-all shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_8px_20px_-6px_rgba(15,157,138,0.55)]"
               >
                 Sign in
               </Link>

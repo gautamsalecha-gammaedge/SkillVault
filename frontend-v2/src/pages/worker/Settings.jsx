@@ -88,7 +88,7 @@ export default function WorkerSettings() {
     try {
       const res = await api.verifyEmailOtp({
         email: form.email.trim(),
-        code: otp.trim(),
+        code: otp.replace(/\s+/g, '').trim(),
         purpose: 'verify_email',
         worker_id: workerId || undefined,
       });

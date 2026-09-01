@@ -1,16 +1,33 @@
-import { createContext, useCallback, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
 
 const ToastCtx = createContext(null);
 let idCounter = 0;
 
+/** Same message+type within this window is ignored (stops network/session spam). */
+const DEDUPE_MS = 4500;
+
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
+  const recentRef = useRef(new Map()); // key -> timestamp
 
   const push = useCallback((message, type = 'info') => {
+    const text = String(message ?? '');
+    const key = `${type}::${text}`;
+    const now = Date.now();
+    const last = recentRef.current.get(key) || 0;
+    if (now - last < DEDUPE_MS) return;
+    recentRef.current.set(key, now);
+    // Opportunistic cleanup
+    if (recentRef.current.size > 40) {
+      for (const [k, ts] of recentRef.current) {
+        if (now - ts > DEDUPE_MS) recentRef.current.delete(k);
+      }
+    }
+
     const id = ++idCounter;
-    setToasts((t) => [...t, { id, message, type }]);
+    setToasts((t) => [...t, { id, message: text, type }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
   }, []);
 

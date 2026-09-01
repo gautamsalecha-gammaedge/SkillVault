@@ -24,6 +24,15 @@ export class ApiError extends Error {
 
 /** Avoid spamming toasts / multiple redirects when many requests 401 at once. */
 let _authRedirecting = false;
+let _lastNetworkToastAt = 0;
+
+/** Pages can call this so only one network toast shows every few seconds. */
+export function shouldShowNetworkToast() {
+  const now = Date.now();
+  if (now - _lastNetworkToastAt < 4000) return false;
+  _lastNetworkToastAt = now;
+  return true;
+}
 
 function handleAuthFailure(auth) {
   if (auth === 'admin') clearAdminSession();
@@ -31,12 +40,20 @@ function handleAuthFailure(auth) {
   if (_authRedirecting) return;
   _authRedirecting = true;
   try {
-    const path = (typeof window !== 'undefined' && window.location && window.location.pathname) || '';
-    const onLogin = path === '/login' || path.startsWith('/login');
-    if (!onLogin && typeof window !== 'undefined') {
-      // Full navigation clears in-flight page state and stops toast spam
-      window.location.assign('/login');
+    if (typeof window === 'undefined') return;
+    const path = window.location.pathname || '';
+    // Already on public auth pages — do not loop
+    if (
+      path === '/login' ||
+      path.startsWith('/login') ||
+      path === '/register' ||
+      path.startsWith('/forgot')
+    ) {
+      _authRedirecting = false;
+      return;
     }
+    // Hard navigation clears React state and stops toast spam from in-flight calls
+    window.location.replace('/login');
   } catch (_) {
     _authRedirecting = false;
   }
@@ -91,9 +108,17 @@ async function apiFetchBinary(path, opts = {}) {
   } catch (e) {
     throw new ApiError(0, 'Network error — check the backend is running and reachable.');
   }
+  if (res.status === 401 || res.status === 403) {
+    if (auth === 'admin' || auth === 'worker') {
+      handleAuthFailure(auth);
+    }
+  }
   if (!res.ok) {
     let message = 'Something went wrong. Please try again.';
     try { const data = await res.json(); message = data.detail || message; } catch (_) {}
+    if (res.status === 401 || res.status === 403) {
+      throw new ApiError(res.status, 'Session expired. Redirecting to login…');
+    }
     throw new ApiError(res.status, message);
   }
   const blob = await res.blob();

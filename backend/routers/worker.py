@@ -32,7 +32,7 @@ from auth.security import hash_password, verify_password, make_expiry_time
 from config import TOKEN_EXPIRY_HOURS
 from auth.worker_auth import require_worker
 from rag.chroma_store import collection
-from mail_util import send_otp_email, send_welcome_email, smtp_configured
+from mail_util import send_otp_email, send_welcome_email, send_password_changed_email, smtp_configured
 from sqlalchemy import text as sql_text
 
 
@@ -75,6 +75,11 @@ def _ensure_email_columns(db: Session):
 
 def _norm_email(email: str) -> str:
     return (email or "").strip().lower()
+
+
+def _norm_otp_code(code: str) -> str:
+    """Digits only — UI / copy-paste often inserts spaces."""
+    return "".join(ch for ch in (code or "") if ch.isdigit())
 
 
 def _mask_email(email: str) -> str:
@@ -386,14 +391,28 @@ def update_my_profile(
             w.email = new_email
             w.email_verified = False
 
+    password_changed = False
     if req.new_password:
         if not req.current_password:
             raise HTTPException(status_code=400, detail="Enter your current password to set a new one.")
         if not verify_password(req.current_password, w.password_hash):
             raise HTTPException(status_code=401, detail="Current password is incorrect.")
         w.password_hash = hash_password(req.new_password)
+        password_changed = True
 
     db.commit()
+
+    if password_changed:
+        email = (getattr(w, "email", None) or "").strip()
+        if email:
+            try:
+                send_password_changed_email(
+                    email,
+                    name=w.name or "",
+                    worker_id=w.worker_id,
+                )
+            except Exception as e:
+                print(f"[SkillVault mail] password-changed email failed: {e}")
 
     return {
         "status": "updated",
@@ -454,7 +473,7 @@ def verify_email_otp(req: VerifyEmailOtpRequest, db: Session = Depends(get_db)):
     """
     _ensure_email_columns(db)
     email = _norm_email(req.email)
-    code = (req.code or "").strip()
+    code = _norm_otp_code(req.code)
     purpose = (req.purpose or "").strip()
     if not email or not code:
         raise HTTPException(status_code=400, detail="Email and code are required.")
@@ -469,9 +488,10 @@ def verify_email_otp(req: VerifyEmailOtpRequest, db: Session = Depends(get_db)):
         .order_by(EmailOtp.id.desc())
         .first()
     )
-    if not row or row.code != code:
+    if not row or _norm_otp_code(row.code) != code:
         raise HTTPException(status_code=400, detail="Invalid or expired code.")
-    if row.expires_at < datetime.utcnow():
+    # 90s grace: container clock / TZ drift should not fail a fresh code
+    if row.expires_at < datetime.utcnow() - timedelta(seconds=90):
         raise HTTPException(status_code=400, detail="Code expired. Request a new one.")
 
     row.consumed = True
@@ -541,7 +561,7 @@ def forgot_reset(req: ForgotResetRequest, db: Session = Depends(get_db)):
     """Reset password after a valid reset OTP for this Worker ID."""
     _ensure_email_columns(db)
     wid = (req.worker_id or "").strip()
-    code = (req.code or "").strip()
+    code = _norm_otp_code(req.code)
     new_password = req.new_password or ""
     if len(new_password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
@@ -562,15 +582,26 @@ def forgot_reset(req: ForgotResetRequest, db: Session = Depends(get_db)):
         .order_by(EmailOtp.id.desc())
         .first()
     )
-    if not row or row.code != code:
+    if not row or _norm_otp_code(row.code) != code:
         raise HTTPException(status_code=400, detail="Invalid or expired code.")
-    if row.expires_at < datetime.utcnow():
+    if row.expires_at < datetime.utcnow() - timedelta(seconds=90):
         raise HTTPException(status_code=400, detail="Code expired. Request a new one.")
 
     row.consumed = True
     db.commit()
     from auth.user_accounts import set_password_for_user
     set_password_for_user(db, wid, new_password)  # also revokes all sessions
+
+    # Security notice — password was changed via email reset
+    try:
+        send_password_changed_email(
+            email,
+            name=w.name or "",
+            worker_id=wid,
+        )
+    except Exception as e:
+        print(f"[SkillVault mail] password-changed email failed: {e}")
+
     return {"status": "password_updated", "message": "Password updated. You can log in now."}
 
 

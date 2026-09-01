@@ -43,6 +43,7 @@ from auth.admin_auth import require_admin
 from auth.admin_accounts import ensure_seed_admin
 from rag.chroma_store import collection, list_manuals, delete_manual, list_all_machine_ids, delete_all_for_machine
 from config import TOKEN_EXPIRY_HOURS
+from mail_util import send_account_approved_email
 
 import tempfile
 import os
@@ -382,6 +383,8 @@ def get_all_workers(authorized: bool = Depends(require_admin), db: Session = Dep
             "phone_country_code": w.phone_country_code,
             "phone_number": w.phone_number,
             "address": w.address,
+            "email": getattr(w, "email", None) or "",
+            "email_verified": bool(getattr(w, "email_verified", False)),
             "roles": roles,
             "is_worker": ROLE_WORKER in roles,
             "is_supervisor": ROLE_SUPERVISOR in roles,
@@ -424,6 +427,8 @@ def get_pending_workers(authorized: bool = Depends(require_admin), db: Session =
                 "phone_country_code": w.phone_country_code or "+91",
                 "phone_number": w.phone_number or "",
                 "address": w.address or "",
+                "email": getattr(w, "email", None) or "",
+                "email_verified": bool(getattr(w, "email_verified", False)),
             }
             for w in pending
         ]
@@ -439,6 +444,18 @@ def approve_worker(worker_id: str, authorized: bool = Depends(require_admin), db
 
     worker.is_approved = True
     db.commit()
+
+    # Notify worker if they have an email on file
+    email = (getattr(worker, "email", None) or "").strip()
+    if email:
+        try:
+            send_account_approved_email(
+                email,
+                worker_id=worker.worker_id,
+                name=worker.name or "",
+            )
+        except Exception as e:
+            print(f"[SkillVault mail] approval email failed: {e}")
 
     return {"status": "approved", "worker_id": worker_id, "name": worker.name}
 
@@ -509,6 +526,23 @@ def admin_update_worker(
     final_phone = req.phone_number if req.phone_number is not None else worker.phone_number
     final_address = req.address if req.address is not None else worker.address
 
+    # Email: normalize; if address changes, drop verification unless client
+    # explicitly sends email_verified=True (after OTP on admin UI).
+    current_email = (getattr(worker, "email", None) or "").strip().lower() or None
+    if req.email is not None:
+        raw = (req.email or "").strip().lower()
+        final_email = raw or None
+    else:
+        final_email = current_email
+    if req.email_verified is True and final_email:
+        final_email_verified = True
+    elif final_email != current_email:
+        final_email_verified = False
+    elif req.email_verified is False:
+        final_email_verified = False
+    else:
+        final_email_verified = bool(getattr(worker, "email_verified", False))
+
     try:
         if renaming:
             new_worker = Worker(
@@ -519,8 +553,8 @@ def admin_update_worker(
                 phone_country_code=final_country_code,
                 phone_number=final_phone,
                 address=final_address,
-                email=getattr(worker, "email", None),
-                email_verified=bool(getattr(worker, "email_verified", False)),
+                email=final_email,
+                email_verified=final_email_verified,
             )
             db.add(new_worker)
             db.flush()  # new row must exist before children are re-pointed at it
@@ -545,6 +579,8 @@ def admin_update_worker(
             worker.phone_country_code = final_country_code
             worker.phone_number = final_phone
             worker.address = final_address
+            worker.email = final_email
+            worker.email_verified = final_email_verified
             db.commit()
             final_worker_id = worker_id
 
@@ -559,6 +595,8 @@ def admin_update_worker(
         "phone_country_code": final_country_code,
         "phone_number": final_phone,
         "address": final_address,
+        "email": final_email,
+        "email_verified": final_email_verified,
     }
 
 

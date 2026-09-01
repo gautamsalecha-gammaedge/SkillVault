@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, X, Plus, Pencil, Search, RefreshCw, Factory, Phone, MapPin,
   Check, UserCheck, UserX, Filter, ChevronRight, Save, KeyRound, Bell,
+  Mail,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { PageHeader, FullPageLoader, Card, Badge, Button } from '../../components/ui';
@@ -127,7 +128,7 @@ export default function WorkersMachines() {
     if (q) {
       list = list.filter((w) => {
         const machinesStr = (assignments[w.worker_id] || []).join(' ');
-        const hay = [w.name, w.worker_id, w.phone_number, w.address, machinesStr]
+        const hay = [w.name, w.worker_id, w.phone_number, w.address, w.email, machinesStr]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -431,6 +432,12 @@ export default function WorkersMachines() {
                             <MapPin size={12} /> {w.address}
                           </span>
                         )}
+                        {w.email && (
+                          <span className="inline-flex items-center gap-1 max-w-[240px] truncate">
+                            <Mail size={12} /> {w.email}
+                            {w.email_verified ? '' : ' (unverified)'}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {assigned.length === 0 ? (
@@ -514,6 +521,12 @@ function WorkerDrawer({
   const [country, setCountry] = useState(worker.phone_country_code || '+91');
   const [phone, setPhone] = useState(worker.phone_number || '');
   const [address, setAddress] = useState(worker.address || '');
+  const [email, setEmail] = useState(worker.email || '');
+  const [emailVerified, setEmailVerified] = useState(!!worker.email_verified);
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [devOtp, setDevOtp] = useState('');
   const [saving, setSaving] = useState(false);
   const [machineQuery, setMachineQuery] = useState('');
   const [busyMachine, setBusyMachine] = useState(null);
@@ -530,6 +543,11 @@ function WorkerDrawer({
     setCountry(worker.phone_country_code || '+91');
     setPhone(worker.phone_number || '');
     setAddress(worker.address || '');
+    setEmail(worker.email || '');
+    setEmailVerified(!!worker.email_verified);
+    setOtp('');
+    setOtpSent(false);
+    setDevOtp('');
     setTab('profile');
     setMachineQuery('');
     setTempPassword('');
@@ -565,6 +583,8 @@ function WorkerDrawer({
         phone_country_code: country.trim() || '+91',
         phone_number: phone.trim() || null,
         address: address.trim() || null,
+        email: email.trim() || null,
+        email_verified: emailVerified,
       };
       if (workerId.trim() && workerId.trim() !== worker.worker_id) {
         body.new_worker_id = workerId.trim();
@@ -595,6 +615,8 @@ function WorkerDrawer({
         phone_country_code: body.phone_country_code,
         phone_number: body.phone_number || '',
         address: body.address || '',
+        email: res.email ?? body.email ?? '',
+        email_verified: typeof res.email_verified === 'boolean' ? res.email_verified : emailVerified,
         is_approved: worker.is_approved,
         ...rolesMeta,
       };
@@ -604,6 +626,8 @@ function WorkerDrawer({
         try { await onRefresh(); } catch { /* ignore */ }
       }
       toast.success('Worker profile saved.');
+      if (typeof res?.email_verified === 'boolean') setEmailVerified(res.email_verified);
+      if (res?.email != null) setEmail(res.email || '');
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not save.');
     } finally {
@@ -744,6 +768,93 @@ function WorkerDrawer({
                   className="field-input resize-none"
                 />
               </Field>
+
+              <Field
+                label="Email"
+                hint={emailVerified ? 'Verified — worker can reset password by email.' : 'Send a code to verify. Unverified email cannot be used for password reset.'}
+              >
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setEmailVerified(false);
+                    setOtpSent(false);
+                  }}
+                  placeholder="worker@company.com"
+                  className="field-input"
+                />
+              </Field>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!email.trim() || emailVerified || otpLoading}
+                  onClick={async () => {
+                    if (!email.trim() || otpLoading) return;
+                    setOtpLoading(true);
+                    setDevOtp('');
+                    try {
+                      const res = await api.sendEmailOtp({
+                        email: email.trim(),
+                        purpose: 'verify_email',
+                        worker_id: worker.worker_id,
+                      });
+                      setOtpSent(true);
+                      if (res.dev_otp) setDevOtp(res.dev_otp);
+                      toast.success(res.mailed ? 'Verification code sent.' : 'Dev code shown (mail off).');
+                    } catch (err) {
+                      toast.error(err?.message || 'Could not send code.');
+                    } finally {
+                      setOtpLoading(false);
+                    }
+                  }}
+                  className="text-sm font-semibold px-3 py-1.5 rounded-full border-2 border-line bg-surface hover:border-signal disabled:opacity-50"
+                >
+                  {emailVerified ? 'Verified' : otpLoading ? 'Sending…' : 'Send verify code'}
+                </button>
+                {emailVerified && (
+                  <span className="text-xs font-semibold text-signal">Verified</span>
+                )}
+              </div>
+              {otpSent && !emailVerified && (
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="flex-1 min-w-[140px]">
+                    <Field label="OTP code">
+                      <input
+                        value={otp}
+                        onChange={(e) => setOtp(e.target.value)}
+                        className="field-input"
+                        placeholder="6-digit code"
+                      />
+                    </Field>
+                  </div>
+                  <button
+                    type="button"
+                    className="h-10 px-4 rounded-full bg-signal text-white text-sm font-semibold"
+                    onClick={async () => {
+                      try {
+                        const res = await api.verifyEmailOtp({
+                          email: email.trim(),
+                          code: otp.replace(/\s+/g, '').trim(),
+                          purpose: 'verify_email',
+                          worker_id: worker.worker_id,
+                        });
+                        setEmailVerified(true);
+                        setOtpSent(false);
+                        if (res.email) setEmail(res.email);
+                        toast.success('Email verified.');
+                      } catch (err) {
+                        toast.error(err?.message || 'Invalid or expired code.');
+                      }
+                    }}
+                  >
+                    Verify
+                  </button>
+                </div>
+              )}
+              {devOtp && !emailVerified && (
+                <p className="text-xs text-amber">Dev OTP: <strong>{devOtp}</strong></p>
+              )}
 
               <div className="mt-6 pt-5 border-t-2 border-line space-y-3">
                 <p className="text-[11px] font-mono uppercase tracking-wider text-muted">Access roles</p>

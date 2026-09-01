@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   UserCheck, Check, X, Search, Phone, MapPin, Users,
-  CheckCheck, Trash2, RefreshCw, Filter, AlertTriangle,
+  CheckCheck, Trash2, RefreshCw, Filter, AlertTriangle, Mail,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { PageHeader, FullPageLoader, EmptyState, Card, Button } from '../../components/ui';
@@ -368,6 +368,22 @@ export default function PendingWorkers() {
                         <div className="flex items-start gap-2 text-sm text-muted">
                           <MapPin size={14} className="mt-0.5 shrink-0 opacity-50" />
                           <span>No address provided</span>
+                        </div>
+                      )}
+                      {w.email ? (
+                        <div className="flex items-start gap-2 text-sm text-text/90">
+                          <Mail size={14} className="text-muted mt-0.5 shrink-0" />
+                          <span className="break-all">
+                            {w.email}
+                            {!w.email_verified && (
+                              <span className="text-muted"> · unverified</span>
+                            )}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2 text-sm text-muted">
+                          <Mail size={14} className="mt-0.5 shrink-0 opacity-50" />
+                          <span>No email provided</span>
                         </div>
                       )}
                     </div>

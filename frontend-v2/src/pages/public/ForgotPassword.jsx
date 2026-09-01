@@ -40,6 +40,7 @@ export default function ForgotPassword() {
   };
 
   const sendOtp = async () => {
+    if (loading) return; // prevent double-tap while request is in flight
     setLoading(true);
     setDevOtp('');
     try {
@@ -66,7 +67,7 @@ export default function ForgotPassword() {
     }
     setLoading(true);
     try {
-      await api.forgotReset({ worker_id: workerId.trim(), code: code.trim(), new_password: pw });
+      await api.forgotReset({ worker_id: workerId.trim(), code: code.replace(/\s+/g, '').trim(), new_password: pw });
       toast.success('Password updated. You can log in now.');
       nav('/login', { replace: true });
     } catch (err) {
@@ -107,28 +108,39 @@ export default function ForgotPassword() {
                 type="button"
                 disabled={!lookup.has_verified_email || loading}
                 onClick={sendOtp}
+                aria-busy={loading}
                 className={`w-full text-left rounded-2xl border-2 p-4 transition-all ${
-                  lookup.has_verified_email
-                    ? 'border-line bg-surface hover:border-amber'
-                    : 'border-line bg-surface-2 opacity-55 cursor-not-allowed'
+                  loading
+                    ? 'border-amber bg-amber/10 cursor-wait'
+                    : lookup.has_verified_email
+                      ? 'border-line bg-surface hover:border-amber'
+                      : 'border-line bg-surface-2 opacity-55 cursor-not-allowed'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <Mail size={20} className="text-amber shrink-0" />
-                  <div>
-                    <p className="font-semibold text-text">Reset by email</p>
+                  <Mail size={20} className={`shrink-0 ${loading ? 'text-amber animate-pulse' : 'text-amber'}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-text">
+                      {loading ? 'Sending code…' : 'Reset by email'}
+                    </p>
                     <p className="text-xs text-muted mt-0.5">
-                      {lookup.has_verified_email
-                        ? `Code to ${lookup.email_masked}`
-                        : 'No verified email on this ID — option disabled'}
+                      {loading
+                        ? 'Please wait — do not tap again.'
+                        : lookup.has_verified_email
+                          ? `Code to ${lookup.email_masked}`
+                          : 'No verified email on this ID — option disabled'}
                     </p>
                   </div>
+                  {loading && (
+                    <span className="shrink-0 h-5 w-5 rounded-full border-2 border-amber border-t-transparent animate-spin" />
+                  )}
                 </div>
               </button>
               <button
                 type="button"
+                disabled={loading}
                 onClick={() => setStep('admin')}
-                className="w-full text-left rounded-2xl border-2 border-line bg-surface hover:border-signal p-4"
+                className={`w-full text-left rounded-2xl border-2 border-line bg-surface hover:border-signal p-4 ${loading ? 'opacity-50 pointer-events-none' : ''}`}
               >
                 <div className="flex items-center gap-3">
                   <UserCog size={20} className="text-signal shrink-0" />

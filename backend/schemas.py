@@ -106,12 +106,16 @@ class AdminUpdateWorkerRequest(BaseModel):
     Every field optional; only the ones provided get changed. No password
     field - admin can never set or view a worker's password. new_worker_id,
     if given and different, renames the worker's login ID (cascades to
-    every table that references it - see admin.py)."""
+    every table that references it - see admin.py).
+    email: if changed without email_verified=True, stored as unverified.
+    Admin can mark verified only after OTP flow (same as worker profile)."""
     new_worker_id: Optional[str] = None
     name: Optional[str] = None
     phone_country_code: Optional[str] = None
     phone_number: Optional[str] = None
     address: Optional[str] = None
+    email: Optional[str] = None
+    email_verified: Optional[bool] = None
 
 class AssignMachineRequest(BaseModel):
     worker_id: str
